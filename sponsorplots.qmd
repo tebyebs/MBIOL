@@ -42,7 +42,7 @@ library(rnaturalearth)         # Map data
 library(rnaturalearthdata)     # Map data
 library(rnaturalearthhires)    # Map data
 library(tidytext)              # Text processing
-
+library(readxl)
 ```
 
 
@@ -55,10 +55,10 @@ I use the here package to specify in my own file folder - you will need to chang
 #| echo: true
 
 # Load data
-merged_bank_summary <- readRDS(here("ribits_data", "merged_bank_summary.rds"))
+ribits_data_simplified <- read_excel("ribits_data_simplified.xlsx")
 
-bank_sponsors <- readRDS(here("ribits_data", "bank_sponsors.rds"))
-bank_pocs <- readRDS(here("ribits_data", "bank_pocs.rds"))
+View(ribits_data_simplified)
+
 # Load in the geopackage data
 gpkg_file <- here("ribits_data", "bank_geometries.gpkg")
 
@@ -82,9 +82,9 @@ its helpful to standardize the column names a bit - I use janitor package to cle
 #| label: clean-data
 #| echo: true
 
-# Clean up the data
-merged_bank_summary <- merged_bank_summary %>% 
-  janitor::clean_names()
+# Clean up the data - already done 
+#ribits_data_simplified <- ribits_data_simplified %>% 
+#  janitor::clean_names()
 
 # Clean up the geometry data
 centroids <- janitor::clean_names(centroids)
@@ -107,75 +107,52 @@ centroids_geom <- centroids %>%
   select(bank_id) %>% 
   rename(centroid = geom)
 
-footprints_geom <- footprints %>% 
-  select(bank_id) %>% 
-  rename(footprint = geom)
-
-service_areas_geom <- service_areas %>% 
-  select(bank_id) %>% 
-  rename(service_area = geom)
 
 # Join them together into a single spatial dataframe
 # We start with all bank IDs from the main table to ensure all banks are included
-banks_geometries <- merged_bank_summary %>%
+banks_geometries <- ribits_data_simplified %>%
   select(bank_id) %>%
-  left_join(centroids_geom, by = "bank_id") %>%
-  left_join(footprints_geom, by = "bank_id") %>%
-  left_join(service_areas_geom, by = "bank_id")
+  left_join(centroids_geom, by = "bank_id")
+
 
 
 # Then, create a fast, non-spatial main dataframe with availability flags
 # This adds boolean flags to the main data, which is much faster and more
-# memory-efficient than joining the actual geometries.
 
-data <- merged_bank_summary %>%
-  mutate(
-    # True/False for if the variable exists
-    has_centroid = bank_id %in% centroids$bank_id,
-    has_footprint = bank_id %in% footprints$bank_id,
-    has_service_area = bank_id %in% service_areas$bank_id
-  )
-
-# clean names again
-data <- data %>% janitor::clean_names()
 
 # Clean up intermediate objects to save memory
 rm(centroids_geom, footprints_geom, service_areas_geom)
 
 # Remove the individual spatial dataframes since they are in a combined one
-rm(centroids, footprints, service_areas)
+rm(centroids, footprints, service_areas, service_areas_individual)
 ```
 
 
-# example left join to bank_pocs and bank_sponsors
+# join ribits simplified with geom data into one database
 
-here i join the data to bank_sponsors to get sponsor information - you may also want to delete some info
+
 ```{r}
 #| label: join-bank-sponsors
 #| echo: true
+merged_bank_summary <- readRDS(here("ribits_data", "merged_bank_summary.rds"))
+# Join with geom data
+ribits_w_geom <- ribits_data_simplified %>%
+  left_join(banks_geometries, by = "bank_id") 
 
-# ensure columns are the same (ignore this if you already ran the column cleaning stuff)
-names(bank_sponsors)[names(bank_sponsors) == "BANK_ID"] <- "bank_id"
-names(bank_pocs)[names(bank_pocs) == "BANK_ID"] <- "bank_id"
+#add establishment year
+ribits_w_geom <- ribits_w_geom %>%
+  left_join(
+    merged_bank_summary %>%
+      select(bank_id, year_established),
+    by = "bank_id"
+  )
+head(ribits_w_geom)
 
-# Join with bank_sponsors and pocs data
-data_with_sponsors_pocs <- data %>%
-  left_join(bank_sponsors, by = "bank_id") %>%
-  left_join(bank_pocs, by = "bank_id")
-
-data_with_sponsors_pocs <- data_with_sponsors_pocs %>%
-  janitor::clean_names()
-
-# Check the result
-glimpse(data_with_sponsors)
+min(ribits_w_geom[,39], na.rm=T)
+max(ribits_w_geom[,39], na.rm=T)
 
 
-# delete/select only columns of interest
-final_data <- data_with_sponsors_pocs %>%
-  select(bank_id, bank_name, establishment_date, bank_status_date, bank_location_centroid, has_centroid, credit_type_list, bank_cowardin_class_list, bank_cowardin_subclass_list, bank_cowardin_subclass_list, bank_cowardin_system_list , bank_status, state_list, county_list, latitude, longitude, bank_status, bank_type, sponsor_name, address1_x, city_x, state_x, zip_x, address2_x, first_name, last_name, email_y, address1_y, city_y, state_y, zip_y, poc_type, address2_y )
 
-# View the final dataset
-glimpse(final_data)
 
 ```
 
@@ -192,18 +169,46 @@ glimpse(final_data)
 # Prepare the centroid data for plotting
 # We need a clean sf object with a valid CRS.
 
-# Create a valid sf object from the centroid data
-centroids_sf <- centroids_geom %>% #used to be banks_geometries
+
+# Create a valid sf object from the centroid data for only public
+public_centroids_sf <- ribits_w_geom %>% 
   # Keep only banks with a centroid geometry
   filter(!sapply(centroid, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Keep only public banks
+  filter(is_public %in% TRUE) %>%
   # Convert to a proper sf object
   st_as_sf(sf_column_name = "centroid", crs = 4326) # Assume WGS84
 
-cat("Prepared", nrow(centroids_sf), "centroids for plotting.\n")
+dedup_publics <- distinct(public_centroids_sf, bank_id, .keep_all = T)
+cat("Prepared", nrow(public_centroids_sf), "centroids for plotting.\n")
+
+# Create a valid sf object from the centroid data for only nonprofit
+nonprofit_centroids_sf <- ribits_w_geom %>% 
+  # Keep only banks with a centroid geometry
+  filter(!sapply(centroid, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Keep only public banks
+  filter(is_nonprofit %in% TRUE) %>%
+  # Convert to a proper sf object
+  st_as_sf(sf_column_name = "centroid", crs = 4326) # Assume WGS84
+
+dedup_nonprofits <- distinct(nonprofit_centroids_sf, bank_id, .keep_all = T)
+cat("Prepared", nrow(nonprofit_centroids_sf), "centroids for plotting.\n")
+
+# yearly maps - start from 1980, this is earliest
+yearly_sf <- ribits_w_geom %>% 
+  # Keep only banks with a centroid geometry
+  filter(!sapply(centroid, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Keep only banks in year
+  filter(year_established == 1980) %>%
+  # Convert to a proper sf object
+  st_as_sf(sf_column_name = "centroid", crs = 4326) # Assume WGS84
+cat("Prepared", nrow(nonprofit_centroids_sf), "centroids for plotting.\n")
 
 # 2. Get base map data using rnaturalearth to get country and state boundaries.
 world <- ne_countries(scale = "medium", returnclass = "sf")
 states <- ne_states(country = "United States of America", returnclass = "sf")
+#this only has to be done once 
+
 
 # 3. Create the map
 ggplot() +
@@ -213,7 +218,7 @@ ggplot() +
   geom_sf(data = states, fill = "gray80", color = "white") +
   # Add the bank centroids on top
   geom_sf(
-    data = centroids_sf,
+    data = top70pe,  #change depending on use 
     color = "red",
     size = 1.5,
     alpha = 0.4,
@@ -227,10 +232,6 @@ ggplot() +
     expand = FALSE,
     crs = 4326 # Use WGS84 projection
   ) +
-  labs(
-    title = "National Distribution of Sites",
-    subtitle = "Each red dot represents one bank centroid."
-  ) +
   # Use a minimal theme suitable for maps
   theme_minimal() +
   theme(
@@ -241,17 +242,46 @@ ggplot() +
 ```
 
 
-
-# Save as CSV file example
-
-For easier manual inspection it might be better to have it in CSV format
-
-
 ```{r}
-#| label: save-csv-example
-#| echo: true
+# yearly maps - start from 1980, this is earliest
+yearly_sf <- ribits_w_geom %>% 
+  # Keep only banks with a centroid geometry
+  filter(!sapply(centroid, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Keep only banks in year
+  filter( between(year_established, 2020,2025)) %>%
+  # Convert to a proper sf object
+  st_as_sf(sf_column_name = "centroid", crs = 4326) # Assume WGS84
+cat("Prepared", nrow(yearly_sf), "centroids for plotting.\n")
 
-# Save the data
-write.csv(final_data, "ribits_data_simplified.csv", row.names = FALSE)
 
+# 3. Create the map
+ggplot() +
+  # Add a base layer for the world, filled with a light grey
+  geom_sf(data = world, fill = "gray90", color = "white") +
+  # Add US state boundaries
+  geom_sf(data = states, fill = "gray80", color = "white") +
+  # Add the bank centroids on top
+  geom_sf(
+    data = yearly_sf,  #change depending on use 
+    color = "red",
+    size = 1.5,
+    alpha = 0.4,
+    shape = 16
+  ) +
+  # Set the coordinate system and limits.
+  # This zooms the map to show the continental US, Alaska, Hawaii, and the Caribbean.
+  coord_sf(
+    xlim = c(-180, -65),
+    ylim = c(18, 72),
+    expand = FALSE,
+    crs = 4326 # Use WGS84 projection
+  ) +
+  # Use a minimal theme suitable for maps
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "aliceblue"),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
 ```
+

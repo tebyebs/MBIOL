@@ -1,0 +1,1747 @@
+---
+title: "RIBITS Cleaned Data Quality Assessment"
+date: "`r Sys.Date()`"
+format: 
+  html:
+    toc: true
+    toc-depth: 4
+    code-fold: true
+    code-tools: true
+editor: source
+---
+
+# Introduction
+
+The Regulatory In-lieu Fee and Bank Information Tracking System (RIBITS) is a database maintained by the U.S. Army Corps of Engineers that tracks mitigation banks, in-lieu fee programs, and sites across the United States. Mitigation banking allows developers who impact wetlands or streams to offset those impacts by purchasing credits from approved banks, which are created, restored, rehabilitated, or preserved wetlands. RIBITS provides key details such as locations, service areas, status, and credit information, making it the main public source for understanding and analyzing mitigation activities nationwide.
+
+I programatically extracted RIBITS data via the GeoJSON API and processed it into a GeoPackage file. The data was processed through a multi-stage pipeline:
+
+-   Raw data extraction from RIBITS API
+-   Spatial data processing
+-   GeoPackage creation with multi-layer spatial data.
+
+Here, I explore the downloaded raw dataset to look at overall coverage and QA checks.
+
+# Document Setup
+
+## Load Packages and Set Chunk Options
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+# Load required packages
+library(sf)                    # Spatial data handling
+library(dplyr)                 # Data manipulation
+library(janitor)               # Data cleaning
+library(purrr)                 # Functional programming
+library(ggplot2)               # Data visualization
+library(lubridate)             # Date and time manipulation
+library(here)                  # File path handling
+library(tidyr)                 # Data tidying
+library(knitr)                 # Document knitting
+library(kableExtra)            # Table styling
+library(glue)                  # String interpolation
+library(rlang)                 # working with base R
+library(stringr)               # pattern matching
+library(gt)                    # Table styling
+library(rnaturalearth)         # Map data
+library(rnaturalearthdata)     # Map data
+library(rnaturalearthhires)    # Map data
+library(tidytext)              # Text processing
+
+# Set ggplot theme
+theme_set(theme_minimal() + 
+          theme(plot.title = element_text(size = 14, face = "bold"),
+                plot.subtitle = element_text(size = 12),
+                axis.title = element_text(size = 10),
+                legend.title = element_text(size = 10)))
+
+# Global chunk options
+knitr::opts_chunk$set(
+  echo       = FALSE,   # Hide code by default for clean report
+  message    = FALSE,  # Hide messages (like package loading)
+  warning    = FALSE,  # Hide warnings
+  error      = FALSE,  # Stop on errors instead of showing them in report
+  fig.align  = "center", # Center all plots
+  out.width  = "90%",  # Scale figures nicely
+  dpi        = 300     # High resolution figures
+)
+```
+
+## Load Reusable Functions
+
+```{r}
+#| label: load-functions
+#| message: false
+#| warning: false
+#| echo: true
+
+# ------------------------------------------------------------------------------
+# Function: Table style formatter
+# ------------------------------------------------------------------------------
+style_table <- function(gt_tbl, title, subtitle = NULL) {
+
+  gt_tbl %>%
+
+  # Add title and subtitle/table_caption
+  tab_header(
+    title = md(title),
+    subtitle = if (!is.null(subtitle)) md(subtitle) else NULL
+  ) %>%
+
+  # Make column headers bold
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels()
+  ) %>%
+
+  # Add row stripes
+  opt_row_striping() %>%
+
+  # General formatting options
+  tab_options(
+    column_labels.border.bottom.color = "black",    # Line under header
+    column_labels.border.bottom.width = px(2),
+    table.border.top.color = "transparent",         # No top border
+    table.border.bottom.color = "transparent",      # No bottom border
+    table.width = pct(90),                          # Consistent width      
+    table.align = "center"                          # Center the table
+  )
+}
+
+# ------------------------------------------------------------------------------
+# Function: collapse_and_count
+# ------------------------------------------------------------------------------
+# Collapses a variable to one value per bank, counts banks per value, and 
+# handles multi-valued strings (splits and counts tokens).
+#
+# Arguments:
+#   data:        Input data (sf or tibble)
+#   var:         Column to analyze (unquoted)
+#   how:         Collapse method ("first", "min", "max", "concat")
+#   explode:     TRUE to split multi-valued strings and count tokens
+#   token_rx:    Regular expression to extract tokens when explode=TRUE
+#   sep:         Joiner for concatenation
+#
+# Returns:
+#   list(counts, bank_level, conflicts)
+#
+# ------------------------------------------------------------------------------
+collapse_and_count <- function(data, var,
+                               how = "first",
+                               explode = FALSE,
+                               token_rx = "\\b[A-Z]{2}\\b",
+                               sep = ", ") {
+  
+  # Ensure data is a tibble. Using as_tibble on sf objects is deprecated,
+  # but st_drop_geometry() is a safe way to convert to a regular tibble.
+  if (inherits(data, "sf")) {
+    data <- sf::st_drop_geometry(data)
+  } else {
+    data <- as_tibble(data)
+  }
+  
+  # Convert var to symbol for easier handling
+  var_sym <- rlang::ensym(var)
+  var_str <- rlang::as_string(var_sym)
+  
+  # Ensure column exists
+  stopifnot(var_str %in% names(data))
+  
+  # Validate `how` parameter
+  how <- match.arg(how, choices = c("first", "min", "max", "concat"))
+
+  # Define collapse function
+  bank_collapse <- function(data, var_sym, how, sep) {
+    
+    var_str <- rlang::as_string(var_sym)
+    
+    data %>%
+      group_by(bank_id) %>%
+      summarise(
+        !!var_sym := {
+          vals <- .data[[var_str]]
+          vals <- vals[!is.na(vals) & vals != ""]
+          if (length(vals) == 0) {
+            # Return a type-stable NA
+            return(NA)
+          }
+          
+          switch(how,
+                 first  = dplyr::first(vals),
+                 min    = suppressWarnings(min(vals, na.rm = TRUE)),
+                 max    = suppressWarnings(max(vals, na.rm = TRUE)),
+                 concat = paste(sort(unique(as.character(vals))), collapse = sep)
+          )
+        },
+        .groups = "drop"
+      )
+  }
+
+  if (!explode) {
+    # Call the collapse function
+    bank_level <- bank_collapse(data, var_sym, how, sep)
+    
+    counts <- bank_level %>%
+      count(!!var_sym, name = "n_banks", sort = TRUE)
+    
+    # Calculate conflicts - banks with multiple different values
+    conflicts <- data %>%
+      group_by(bank_id) %>%
+      summarise(
+        n_distinct = n_distinct(.data[[var_str]], na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      filter(n_distinct > 1) %>%
+      select(bank_id, n_distinct)
+    
+  } else {
+    # Explode mode for multi-valued strings
+    data_exploded <- data %>%
+      select(bank_id, !!var_sym) %>%
+      mutate(.raw = as.character(.data[[var_str]])) %>%
+      mutate(tokens = stringr::str_extract_all(coalesce(.raw, ""), token_rx)) %>%
+      tidyr::unnest_longer(tokens, values_to = "token", keep_empty = TRUE) %>%
+      mutate(token = na_if(token, ""))
+
+    counts <- data_exploded %>%
+      filter(!is.na(token)) %>%
+      count(token, name = "n_banks", sort = TRUE)
+
+    bank_level <- data_exploded %>%
+      filter(!is.na(token)) %>%
+      group_by(bank_id) %>%
+      summarise(
+        !!var_sym := paste(sort(unique(token)), collapse = sep),
+        .groups = "drop"
+      )
+
+    conflicts <- data_exploded %>%
+      group_by(bank_id) %>%
+      summarise(
+        n_distinct = n_distinct(token, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      filter(n_distinct > 1) %>%
+      select(bank_id, n_distinct)
+  }
+
+  return(list(
+    counts = counts,
+    bank_level = bank_level,
+    conflicts = conflicts
+  ))
+}
+# ------------------------------------------------------------------------------
+```
+
+## Load Data
+
+```{r}
+#| label: load-data
+#| echo: true
+
+# Load the merged bank summary data
+merged_bank_summary <- readRDS(here("data", "data_intermediate", "merged_bank_summary.rds"))
+
+# Load in the geopackage data
+gpkg_file <- here("data", "data_intermediate", "bank_geometries.gpkg")
+
+if (file.exists(gpkg_file)) {
+  # Load all layers
+  centroids <- st_read(gpkg_file, layer = "bank_centroids", quiet = TRUE)
+  footprints <- st_read(gpkg_file, layer = "bank_footprints", quiet = TRUE)
+  service_areas <- st_read(gpkg_file, layer = "bank_service_areas", quiet = TRUE)
+  service_areas_individual <- st_read(gpkg_file, layer = "bank_service_areas_individual", quiet = TRUE)
+} else {
+  stop("GeoPackage file not found!")
+}
+```
+
+## Clean up data
+
+```{r}
+#| label: clean-data
+#| echo: true
+
+# Clean up the data
+merged_bank_summary <- merged_bank_summary %>% 
+  janitor::clean_names()
+
+# Clean up the geometry data
+centroids <- janitor::clean_names(centroids)
+footprints <- janitor::clean_names(footprints)
+service_areas <- janitor::clean_names(service_areas)
+service_areas_individual <- janitor::clean_names(service_areas_individual)
+```
+
+## Create Analysis Dataframes
+
+```{r}
+#| label: create-analysis-dataframes
+#| echo: true
+
+# To avoid memory issues, I separate out the geometries from the main table.
+# Extract and rename geometry from each layer
+centroids_geom <- centroids %>% 
+  select(bank_id) %>% 
+  rename(centroid = geom)
+
+footprints_geom <- footprints %>% 
+  select(bank_id) %>% 
+  rename(footprint = geom)
+
+service_areas_geom <- service_areas %>% 
+  select(bank_id) %>% 
+  rename(service_area = geom)
+
+# Join them together into a single spatial dataframe
+# We start with all bank IDs from the main table to ensure all banks are included
+banks_geometries <- merged_bank_summary %>%
+  select(bank_id) %>%
+  left_join(centroids_geom, by = "bank_id") %>%
+  left_join(footprints_geom, by = "bank_id") %>%
+  left_join(service_areas_geom, by = "bank_id")
+
+
+# Then, create a fast, non-spatial main dataframe with availability flags
+# This adds boolean flags to the main data, which is much faster and more
+# memory-efficient than joining the actual geometries.
+
+data <- merged_bank_summary %>%
+  mutate(
+    # True/False for if the variable exists
+    has_centroid = bank_id %in% centroids$bank_id,
+    has_footprint = bank_id %in% footprints$bank_id,
+    has_service_area = bank_id %in% service_areas$bank_id
+  )
+
+# clean names again
+data <- data %>% janitor::clean_names()
+
+# Clean up intermediate objects to save memory
+rm(centroids_geom, footprints_geom, service_areas_geom)
+
+# Remove the individual spatial dataframes since they are in a combined one
+rm(centroids, footprints, service_areas)
+```
+
+# Data Exploration
+
+Let's explore the basic characteristics of the RIBITS dataset, including variable descriptions, data availability and quality, bank types, and geographic distribution.
+
+```{r}
+#| label: ribits-variable-descriptions
+#| echo: true
+
+# Display available variables (commented out for now)
+# data %>%
+#   select(-BANK_LOCATION_CENTROID) %>%
+#   colnames() %>%
+#   paste(collapse = ", ")
+
+# This is pasted from RIBITS documentation
+ribits_vars <- tribble(
+  ~Variable,                  ~Description,
+  "BANK_ID",                  "Unique ID for the bank or ILF site",
+  "BANK_NAME",                "Name of the bank",
+  "kind_of_bank",             "ILF, NRDA, Umbrella, or Standard",
+  "IS_404",                   "Yes or No (Section 404 applicability)",
+  "IS_CONSERVATION",          "Yes or No (Conservation bank indicator)",
+  "CHAIR",                    "Overseeing agency",
+  "district",                 "Managing district the bank is in",
+  "SECONDARY_district_LIST",  "Secondary districts the bank location is in",
+  "FIELD_OFFICE",             "Affiliated field office the bank is in",
+  "SECONDARY_OFFICE_LIST",    "Secondary field offices the bank is in",
+  "NMFS_REGION",              "Affiliated NMFS region",
+  "SECONDARY_NOAA_REGION_LIST","Secondary NMFS regions the bank is in",
+  "state_list",               "Comma-separated list of states",
+  "COUNTY_LIST",              "Comma-separated list of counties",
+  "PERMIT_NUMBER",            "Comma-separated list of bank or site permits",
+  "year_established",         "Year the bank was established",
+  "establishment_date",       "Date bank was established",
+  "CLOSURE_DATE",             "Date of bank closure",
+  "total_acres",              "Total acres of the bank",
+  "bank_status",              "Bank status",
+  "bank_status_DATE",         "Date bank status was changed",
+  "bank_type",                "Type of bank",
+  "WEBSITE",                  "Website of the bank",
+  "COMMENTS",                 "Any additional comments about the bank",
+  "RIBITS_URL_TO_BANK",       "URL to the bank in RIBITS",
+  "ILF_PROGRAM_DATA_WS_URL",  "For ILF site, link to ILF program details",
+  "UMBRELLA_INSTRUMENT_DATA_WS_URL", "For umbrella banks, link to Umbrella Instrument details",
+  "BANK_GEOMETRY_OBSCURED",   "Flag for whether geometry is hidden (1 = obscured)",
+  "BANK_LOCATION_CENTROID",   "Centroid (Lat/Long) of the bank location",
+  "BANK_FOOTPRINT",           "Bank footprint (GeoJSON)",
+  "SERVICE_AREAS",            "Service areas for ILF sites",
+  "BANK_SPONSORS",            "Entities responsible for the bank",
+  "BANK_POCS",                "Bank points of contact (owners/consultants)",
+  "BANK_MANAGERS",            "Regulatory bank managers",
+  "BANK_IRT_MEMBERS",         "Interagency Review Team members",
+  "BANK_OTHER_CONTACTS",      "Other contacts for the bank",
+  "LEDGER",                   "Ledger of bank credits/debits"
+)
+
+# Create a table
+ribits_vars %>%
+  # Create a GT table
+  gt() %>%
+  # Add column labels
+    cols_label(
+      Variable = "Variable",
+      Description = "Description"
+    ) %>%
+    # Apply theme
+    style_table(
+      title = "**RIBITS Variables**"
+    )
+```
+
+## Data Quality
+
+### Missing Data
+
+Let's get a feel for how many values have missing data. Below I summarize how many variables are missing row values.
+
+```{r}
+#| label: missing-data-overview
+#| echo: true
+
+# Analyze missing data patterns
+missing_analysis <- data %>%
+  
+  # First convert the True/False geometry columns to NA
+  mutate(
+    CENTROID = na_if(has_centroid, FALSE),
+    FOOTPRINT = na_if(has_footprint, FALSE),
+    SERVICE_AREA = na_if(has_service_area, FALSE)
+  ) %>%
+  # unselect the original geom columns
+  select(-c(has_centroid, has_footprint, has_service_area)) %>%
+
+  # Now this summarise/across will work correctly
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+
+  # Convert to long data 
+  pivot_longer(cols = everything(), names_to = "Field", values_to = "Missing_Count") %>%
+  # Calculate as a proportion (0-1) so fmt_percent() works perfectly
+  mutate(Missing_Proportion = Missing_Count / nrow(data)) %>%
+  filter(Missing_Count > 0) %>%
+  arrange(desc(Missing_Count))
+
+if (nrow(missing_analysis) > 0) {
+  
+  # Get the count for the subtitle
+  num_missing_vars <- nrow(missing_analysis)
+  
+  # Display the detailed gt table
+  
+    missing_analysis %>%
+      gt() %>%
+      # --- Data-specific formatting ---
+      cols_label(
+        Field = "Field",
+        Missing_Count = "Missing Count",
+        Missing_Proportion = "Missing (%)"
+      ) %>%
+      # Format the count with commas and no decimals
+      fmt_number(
+        columns = Missing_Count,
+        decimals = 0
+      ) %>%
+      # Format the proportion into a percentage
+      fmt_percent(
+        columns = Missing_Proportion,
+        decimals = 1
+      ) %>%
+      
+      # --- Apply your consistent theme ---
+      style_table(
+        title = "**Missing Data Overview**",
+        subtitle = glue("{num_missing_vars} field(s) have missing values.")
+      )
+
+} else {
+  # This is fine, or you could use a gt-styled message
+  cat("No missing data detected in the main dataset.")
+}
+```
+
+Many of the columns aren't super important (secondary office list, secondary district list, website/URL fields). However, there are a few we should note that have significant amounts of missing data:
+
+-   Footprint
+-   Service Area
+-   Total Acres
+
+These three fields might come in useful later for calculating total area offset or other metrics of interest. Let's now dive specifically into the spatial data quality.
+
+### Spatial Data Quality
+
+```{r}
+#| label: spatial-data-quality
+#| message: false
+#| warning: false
+#| echo: true
+
+# Build flags to see what data exists
+spat_flags <- data %>%
+  
+  # Only choose banks in dataset
+  distinct(bank_id, .keep_all = TRUE) %>%
+  
+  # Create new dataframe with specified columns
+  transmute(
+    bank_id,
+    has_centroid      = has_centroid,
+    has_footprint     = has_footprint,
+    has_service_area  = has_service_area,
+    has_total_acres   = !is.na(total_acres), # Already a TRUE/FALSE flag
+  ) 
+
+# Counter for the number of total banks
+n_banks <- dplyr::n_distinct(spat_flags$bank_id)
+
+# overall coverage
+overall_cov <- spat_flags %>%
+  # Summarise all the TRUE/FALSE columns.
+  # sum(column, na.rm = TRUE) counts all the TRUEs.
+  summarise(
+    `Has centroid`      = sum(has_centroid,     na.rm = TRUE),
+    `Has footprint`     = sum(has_footprint,    na.rm = TRUE),
+    `Has service area`  = sum(has_service_area, na.rm = TRUE),
+    `Has total acres`   = sum(has_total_acres,  na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = "Field", values_to = "Count") %>%
+  mutate(
+    Proportion = Count / n_banks # Calculate 0-1 proportion for gt
+  )
+
+# Print this using a gt table
+  overall_cov %>%
+    gt() %>%
+    cols_label(
+      Field = "Flag",
+      Count = "Count",
+      Proportion = "Percent"
+    ) %>%
+    fmt_percent(
+      columns = Proportion,
+      decimals = 1
+    ) %>%
+    fmt_number(
+      columns = Count,
+      decimals = 0
+    ) %>%
+    # Apply your consistent theme
+    style_table(
+      title = "**Spatial Data Coverage**",
+      subtitle = glue("Based on {n_banks} banks")
+    )
+```
+
+### Footprint and Total Acres Coverage
+
+For future analyses, we might also want to know the total area made up by the banks. We can calculate this either using the total_acres column, or by extracting the area from the bank footprint polygon. Let's check what banks have areal information (either the footprint, the total acreage, both, or none).
+
+```{r}
+#| label: footprint-vs-acres
+#| message: false
+#| warning: false
+#| echo: true
+
+# Create the table dataframe 
+footprint_acres <- spat_flags %>%
+  mutate(
+    
+    # Convert to yes/no
+    has_footprint = ifelse(has_footprint, "Yes", "No"),
+    has_acres     = ifelse(has_total_acres, "Yes", "No")
+  ) %>%
+
+  # Count the number of banks that have footprint / total acres
+  count(has_footprint, has_acres, name = "Banks") %>%
+  
+  # Convert to a percentage 
+  mutate(Share = round(100 * Banks / sum(Banks), 1)) %>%
+  arrange(desc(Banks))
+
+# Create a GT table
+footprint_acres %>%
+    gt() %>%
+    cols_label(
+      has_footprint = "Has footprint",
+      has_acres     = "Has total acres",
+      Share         = "Share (%)"
+    )  %>%
+    style_table(
+      title    = "**Data Availability: Footprint × Total Acres**",
+      subtitle = glue("Across {n_banks} banks"))
+
+```
+
+There is fairly complete information on spatial area - only 572 banks (11.6%) have no footprint or total acreage information.
+
+### Footprint and Total Acres Alignment
+
+A quick inspection of the data seems like there might be discrepancies between the area calculated from the `BANK_FOOTPRINT` geometry against the `total_acres` value reported in the data. To compare, we first need to ensure the area is calculated correctly. Geometries are often stored in a geographic CRS (like WGS84, EPSG:4326), where units are in degrees. To get an accurate area in meters, we must first transform the data into a projected, equal-area CRS. For the continental U.S., the Albers Equal Area projection (EPSG:5070) is a standard choice.
+
+Below, I transform the spatial data, convert area into square meters, convert square meters into acres, and then compare the values of total acres listed to the calculated total acres.
+
+```{r}
+#| label: footprint-acres-alignment-plot
+#| message: false
+#| warning: false
+#| echo: true
+# 1. Prepare the data for area calculation
+# The CRS is missing and the dataframe is not a true sf object. We need to explicitly create an sf object from the footprint data and set its CRS before transforming. WGS84 (EPSG:4326) is a safe assumption for GeoJSON data.
+
+# Define the original and target CRS
+initial_crs <- 4326 # WGS84
+target_crs <- 5070  # Albers Equal Area for US
+
+# Create a valid sf object from the footprint data
+footprints_sf <- banks_geometries %>%
+  # Keep only banks with a footprint geometry
+  filter(!sapply(footprint, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Convert to a proper sf object, specifying the geometry column
+  st_as_sf(sf_column_name = "footprint", crs = initial_crs)
+
+# 2. Calculate area
+footprint_areas <- footprints_sf %>%
+  # Transform to an equal-area projection
+  st_transform(crs = target_crs) %>%
+  # Calculate area in square meters, then convert to acres
+  mutate(
+    calculated_acres = as.numeric(st_area(footprint)) / 4046.86
+  ) %>%
+  # We only need the ID and the calculated area
+  st_drop_geometry() %>%
+  select(bank_id, calculated_acres)
+
+# 3. Join calculated area with reported acres
+comparison_df <- data %>%
+  # We only need total_acres for comparison
+  select(bank_id, total_acres) %>%
+  # Join the calculated areas
+  inner_join(footprint_areas, by = "bank_id") %>%
+  # Filter out cases with no reported acres
+  filter(!is.na(total_acres) & total_acres > 0) %>%
+  # Calculate the discrepancy ratio
+  mutate(
+    discrepancy_ratio = calculated_acres / total_acres
+  )
+
+# 4. Visualize the comparison
+# A scatter plot is ideal for this. A 1:1 line shows where perfect agreement lies.
+ggplot(comparison_df, aes(x = total_acres, y = calculated_acres)) +
+  geom_point(alpha = 0.5, color = "red") +
+  # Add a 1:1 line for perfect agreement
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "black", linewidth = 1.2) +
+  # Use a log scale to handle the wide range of values
+  scale_x_log10(labels = scales::comma) +
+  scale_y_log10(labels = scales::comma) +
+  labs(
+    title = "Footprint Area vs. Reported Acres",
+    subtitle = glue("Across {nrow(comparison_df)} banks"),
+    x = "Reported Total Acres (log scale)",
+    y = "Calculated Footprint Acres (log scale)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title    = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    axis.title.x  = element_text(size = 11),
+    axis.title.y  = element_text(size = 11)
+  )+
+  coord_fixed() # Ensures the 1:1 line is visually accurate
+```
+
+There are `r nrow(footprint_areas)` banks with footprint information, and `r nrow(comparison_df)` banks with both reported acres and a valid footprint to compare.
+
+The plot above generally shows a correlation between the reported `total_acres` and the area calculated from the footprint geometries. I would not call this a great plot though - there is a lot of dispersion around the line, and in theory, the reported acreage and the calculated acreage should be exactly the same. However, we are seeing:
+
+-   **Under-reported Area**: Points below the line, where the calculated footprint area is *smaller* than the reported total acres. This could be because `total_acres` refers to the entire property parcel, while the footprint only covers the actual mitigation area.
+-   **Over-reported Area**: Points above the line, where the calculated footprint is significantly *larger* than the reported acreage. These are a bit more more concerning, as it signals data entry errors in `total_acres` or an incorrect footprint geometry.
+-   **Outliers**: A few points are far from the line, representing significant discrepancies. These are likely service area polygons that were misattributed to the footprint column in RIBITS.
+
+Let's check how many banks actually fall significantly outside of the line. Here, I plot the data as a histogram, with the 1:1 ratio line in black, with grey lines at 0.5 and 2 to indicate an acceptable "margin of error" (i.e. banks with reported areas either half as small or twice as large as the calculated area). We may want to think about what is an acceptable margin of error for further analyses.
+
+```{r}
+#| label: discrepancy-ratio-histogram
+#| message: false
+#| warning: false
+#| echo: true
+
+# Histogram of the Discrepancy Ratio
+discrepancy_plot <- ggplot(comparison_df, aes(x = discrepancy_ratio)) +
+  geom_histogram(bins = 100, fill = "dodgerblue", alpha = 0.8) +
+  # Use a log10 scale to see the distribution of extreme outliers
+  scale_x_log10(breaks = c(0.1, 0.5, 1, 2, 5, 10, 100, 1000, 10000)) +
+  # Add vertical lines at key thresholds for context
+  geom_vline(xintercept = 1.0, color = "black", linetype = "dashed", size = 1) +
+  geom_vline(xintercept = c(0.5, 2.0), color = "grey", linetype = "dashed", size = 1) +
+  labs(
+    title = "Distribution of Discrepancy Ratios",
+    subtitle = glue("Across {nrow(comparison_df)} banks"),
+    x = "Discrepancy Ratio (Geometric Area / Listed Area) - Log Scale",
+    y = "Number of Banks"
+  ) +
+  theme_bw() +
+    theme(
+    plot.title    = element_text(size = 12, face = "bold"),
+    plot.subtitle = element_text(size = 10),
+    axis.title.x  = element_text(size = 11),
+    axis.title.y  = element_text(size = 11)
+  )
+
+discrepancy_plot
+```
+
+We see a large peak near 1.0, which is good. But we also see fairly long tails to both the right and left, as well as a decent amount of banks just outside the "margin of error". Let's check the top 20 "worst" (i.e., most misaligned) banks.
+
+```{r}
+#| label: discrepancy-ratio-table-top-twenty
+#| message: false
+#| warning: false
+#| echo: true
+
+# Create table of top 20 banks with greatest discrepancy
+top_discrepancies <- comparison_df %>%
+  # Create a column for absolute distance from a perfect ratio of 1
+  mutate(abs_log_ratio = abs(log10(discrepancy_ratio))) %>%
+  arrange(desc(abs_log_ratio)) %>%
+  head(20)
+
+# Make the table 
+  top_discrepancies %>%
+    gt() %>%
+    cols_label(
+      bank_id       = "Bank ID",
+      total_acres   = "Listed Total Acres",
+      calculated_acres = "Calculated Total Acres",
+      discrepancy_ratio  = "Discrepancy Ratio"
+    )  %>%
+    style_table(
+      title    = "**Top 20 Highest Area/Footprint Discrepancies**",
+      subtitle = glue("Across {nrow(comparison_df)} banks"))
+
+```
+
+Clearly these are incorrect and likely just service area polygons listed as footprints. However, all of this makes it a bit difficult to trust the RIBITS data - many calculated area values are either higher or lower than the reported values, so knowing which is the "true" value is unclear. For any analyses, we may want to:
+
+-   Define our margin of error (how big/small can the area discrepancy ratio be)
+-   Remove all banks that fall outside of that margin of error
+-   Then calculate downstream stats
+
+If we don't, we may run the risk of over-inflating any area counts.
+
+## Bank Characteristics
+
+Let's now move on to exploring the variables in the RIBITS extract.
+
+### Spatial Distribution
+
+Let's see where the banks are, and how their spatial distribution varies by state and district. First, I will plot the centroids on a map of the U.S.
+
+```{r}
+#| label: bank-national-distribution-map
+#| echo: true
+#| fig-cap: "Distribution of RIBITS bank centroids across the United States."
+#| fig-width: 10
+#| fig-height: 6
+
+# Prepare the centroid data for plotting
+# We need a clean sf object with a valid CRS.
+
+# Create a valid sf object from the centroid data
+centroids_sf <- banks_geometries %>%
+  # Keep only banks with a centroid geometry
+  filter(!sapply(centroid, function(x) is.null(x) || st_is_empty(x))) %>%
+  # Convert to a proper sf object
+  st_as_sf(sf_column_name = "centroid", crs = 4326) # Assume WGS84
+
+cat("Prepared", nrow(centroids_sf), "centroids for plotting.\n")
+
+# 2. Get base map data using rnaturalearth to get country and state boundaries.
+world <- ne_countries(scale = "medium", returnclass = "sf")
+states <- ne_states(country = "United States of America", returnclass = "sf")
+
+# 3. Create the map
+ggplot() +
+  # Add a base layer for the world, filled with a light grey
+  geom_sf(data = world, fill = "gray90", color = "white") +
+  # Add US state boundaries
+  geom_sf(data = states, fill = "gray80", color = "white") +
+  # Add the bank centroids on top
+  geom_sf(
+    data = centroids_sf,
+    color = "red",
+    size = 1.5,
+    alpha = 0.4,
+    shape = 16
+  ) +
+  # Set the coordinate system and limits.
+  # This zooms the map to show the continental US, Alaska, Hawaii, and the Caribbean.
+  coord_sf(
+    xlim = c(-180, -65),
+    ylim = c(18, 72),
+    expand = FALSE,
+    crs = 4326 # Use WGS84 projection
+  ) +
+  labs(
+    title = "National Distribution of Sites",
+    subtitle = "Each red dot represents one bank centroid."
+  ) +
+  # Use a minimal theme suitable for maps
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "aliceblue"),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+```
+
+We have a pretty wide geographic distribution of banks, with significant clusters in the eastern and southeastern U.S., the northern midwest (Minnesota), California, the Pacific Northwest, and along the Gulf Coast. There's also coverage in Alaska, and Puerto Rico, interestingly enough. I will now quickly plot the distribution in the conterminous U.S. (lower 48):
+
+```{r}
+#| label: map-conterminous-us
+#| echo: true
+
+ggplot() +
+  # Add a base layer for the world
+  geom_sf(data = world, fill = "gray90", color = "white") +
+  # Add US state boundaries
+  geom_sf(data = states, fill = "gray80", color = "white") +
+  # Add the bank centroids on top
+  geom_sf(
+    data = centroids_sf,
+    color = "red",
+    size = 1.5,
+    alpha = 0.4,
+    shape = 16
+  ) +
+
+  # Set the coordinate system and limits.
+  # These new coordinates zoom to the conterminous (lower 48) US.
+  coord_sf(
+    xlim = c(-125, -66.5),  # From Washington coast to Maine coast
+    ylim = c(24, 50),     # From Florida keys to Canadian border
+    expand = FALSE,
+    crs = 4326 # Use WGS84 projection
+  ) +
+  
+  # --- UPDATED TITLE ---
+  labs(
+    title = "Distribution of Sites (Conterminous US)",
+    subtitle = "Each red dot represents one bank centroid."
+  ) +
+  
+  # Use a minimal theme suitable for maps
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "aliceblue"),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12)
+  )
+
+```
+
+Let's break the geographic distribution down by state:
+
+```{r}
+#| label: calculate-state-stats-geo-summary
+#| echo: true
+#| include: false 
+
+# Collapse and count state_list
+res_states   <- collapse_and_count(data, state_list, explode = TRUE)
+state_counts <- res_states$counts
+banks_unique <- res_states$bank_level
+
+# Quick headline numbers
+n_banks  <- dplyr::n_distinct(data$bank_id)
+n_states <- nrow(state_counts)
+top_n    <- 15
+top_slice <- state_counts %>% slice_max(n_banks, n = top_n)
+
+# All official 50 states
+us_states <- state.abb
+
+# Compare observed vs official
+states_with_banks <- sort(unique(state_counts$token))
+missing_states    <- setdiff(us_states, states_with_banks)
+extra_codes       <- setdiff(states_with_banks, us_states)
+
+# Banks missing state info
+n_missing_state <- banks_unique %>%
+  filter(is.na(state_list)) %>%
+  nrow()
+pct_missing_state <- round(100 * n_missing_state / n_banks, 1)
+
+# Create helper variables for prose
+
+# Helper for the Top N list. This creates a markdown-ready string.
+top_states_md <- paste0("- ", top_slice$token, ": ", top_slice$n_banks, collapse = "\n")
+
+# Helper for the missing states list
+missing_states_md <- paste(missing_states, collapse = ', ')
+
+# Helper for the extra codes list
+extra_codes_md <- paste(extra_codes, collapse = ', ')
+```
+
+There are `r n_banks` unique banks represented across `r n_states` states. `r n_missing_state` banks (`r pct_missing_state`%) have no recorded state information. Banks are present in `r length(states_with_banks)` states (plus `r extra_codes_md`). No banks are present in the following `r length(missing_states)` states: `r missing_states_md`. The top `r top_n` states by number of banks:
+
+```{r}
+#| label: geo-spread-bar-chart-states
+#| echo: true
+
+# Bar chart of the top 15 states
+state_counts %>%
+  slice_max(n_banks, n = 15) %>%
+  ggplot(aes(x = reorder(token, n_banks), y = n_banks)) +
+  geom_col(color = "black", fill = "seagreen2") +
+  geom_text(aes(label = n_banks),
+            hjust = -0.2,             # push text a little outside the bar
+            size = 4) +             # control text size
+  coord_flip() +
+  labs(
+    title = "Number of Banks by State (Top 15)",
+    x = "State",
+    y = "Number of Banks"
+  ) +
+  theme_minimal() +
+  expand_limits(y = max(state_counts$n_banks, na.rm = TRUE) * 1.1)  # add space for labels
+```
+
+We can also break it down by USACE District, which is responsible for overseeing the management and reporting on banking.
+
+```{r}
+#| label: plot-district-counts
+#| echo: true
+
+# Create the counts for USACE Districts
+
+# Rename the new count column to 'n_banks'
+district_counts <- data %>%
+  filter(!is.na(district)) %>%            # Remove any NA district entries
+  count(district, name = "n_banks") %>%   # Count banks per district
+  arrange(desc(n_banks))                # Sort from largest to smallest
+
+# Bar chart of the top 15 districts
+  district_counts %>%
+    slice_max(n_banks, n = 15) %>%
+    ggplot(aes(x = reorder(district, n_banks), y = n_banks)) + # Swapped 'token' for 'district'
+    geom_col(color = "black", fill = "dodgerblue3") +  # Changed color
+    geom_text(aes(label = n_banks),
+              hjust = -0.2,       # push text a little outside the bar
+              size = 4) +         # (I made the size a bit smaller)
+    coord_flip() +
+    labs(
+      title = "Number of Banks by USACE District (Top 15)", # Updated title
+      x = "USACE District",                     # Updated x-axis
+      y = "Number of Banks"
+    ) +
+    theme_minimal() +
+    # Make sure to use the new district_counts for the limit
+    expand_limits(y = max(district_counts$n_banks, na.rm = TRUE) * 1.1)
+
+```
+
+### Kinds of Banks
+
+There are several **Kinds of banks (`kind_of_bank`):** represented in the dataset:
+
+-   **ILF (In-Lieu Fee program):** Permittee pays a fee; the ILF sponsor later uses those funds to restore or establish wetlands/streams.
+-   **NRDA (Natural Resource Damage Assessment):** Bank created to offset environmental damages (e.g., oil spills, hazardous releases).
+-   **Umbrella Bank:** A single “umbrella” instrument covering multiple sites under one sponsor/permit.
+-   **Standard Bank:** The most common type; a single mitigation bank site with its own instrument.
+
+**Other classifications:**
+
+-   **Is 404 (`IS_404`):** Indicates whether the bank is authorized under Section 404 of the Clean Water Act (administered by the U.S. Army Corps of Engineers).
+    -   *Yes*: Usable for compensatory mitigation required by 404 permits.
+    -   *No*: May be tied to state, local, or non-404 obligations.
+-   **Is Conservation Bank (`IS_CONSERVATION`):** Indicates whether the site is a conservation bank under the U.S. Fish & Wildlife Service.
+    -   Conservation banks focus on endangered species habitat offsets rather than wetlands/streams.
+    -   They often coexist in RIBITS alongside mitigation banks but serve different legal/regulatory purposes.
+
+```{r}
+#| label: bank-kinds-summary
+#| echo: true
+#| results: "asis"
+
+# Apply collapse and count function to bank types, whether they are 404 or not, and whether they are conservation banks or not
+bank_kinds <- collapse_and_count(data, "kind_of_bank", how = "first")
+bank_404 <- collapse_and_count(data, "is_404", how = "first") 
+bank_conservation <- collapse_and_count(data, "is_conservation", how = "first")
+
+# Table: Bank Kind Distribution
+  # Get the bank types
+  bank_kinds$counts %>%
+    gt() %>%
+    cols_label(
+      kind_of_bank  = "Kind of Bank",
+      n_banks       = "Number of Banks"
+    ) %>%
+    style_table(
+      title    = "**Bank Kind Distribution**",
+      subtitle = glue("Across {nrow(data)} banks"))
+
+# Table: Section 404 Applicability
+  bank_404$counts %>%
+    gt() %>%
+    cols_label(
+      is_404  = "Section 404 Applicable",
+      n_banks = "Number of Banks"
+    ) %>%
+    style_table(
+      title    = "**Section 404 Applicability**",
+      subtitle = glue("Across {nrow(data)} banks"))
+
+# Table: Conservation Bank Status
+  bank_conservation$counts %>%
+    gt() %>%
+    cols_label(
+      is_conservation  = "Conservation Bank",
+      n_banks = "Number of Banks"
+    ) %>%
+    style_table(
+      title    = "**Conservation Bank Status**",
+      subtitle = glue("Across {nrow(data)} banks"))
+```
+
+### Bank Type
+
+In addition to kinds of banks, there is also the type of bank. The **bank type (`bank_type`)** field describes who owns, operates, or sponsors the mitigation bank and provides context on the institution behind the credits and how they are managed.
+
+-   **Private Commercial**\
+    Privately owned, for-profit entities that develop banks and sell credits on the open market.\
+    This is the most common type of mitigation bank.
+
+-   **Public Commercial**\
+    Government agencies (e.g., state DOTs, local governments) acting as bank sponsors and selling credits.
+
+-   **Private Nonprofit**\
+    Nonprofit organizations (such as land trusts or conservation groups) that operate banks, often reinvesting proceeds into restoration and stewardship.
+
+-   **Single-Client**\
+    Banks established to serve the mitigation needs of a single developer or project sponsor.\
+    Credits are not generally available to the broader market.
+
+-   **Combination Public/Private**\
+    Joint ventures where both public agencies and private entities share roles in sponsoring or managing the bank.
+
+Here I show it as a plot rather than a table.
+
+```{r}
+#| label: bank-type-summary-and-plot
+#| message: false
+#| warning: false
+#| echo: true
+
+# Collapse to one row per bank (take first recorded type per bank)
+bank_type    <- collapse_and_count(data, "bank_type", how = "first")
+type_level  <- bank_type$bank_level
+type_counts <- bank_type$counts %>% filter(!is.na(bank_type))
+
+# Horizontal bar chart with value labels
+ggplot(type_counts, aes(x = reorder(bank_type, n_banks), y = n_banks)) +
+  geom_col(color = "black", fill = "seagreen") +
+  geom_text(aes(label = n_banks), hjust = -0.2, size = 5) +
+  coord_flip() +
+  labs(
+    title = "Distribution of Bank Type",
+    x = "Bank Type",
+    y = "Number of Banks"
+  ) +
+  expand_limits(y = max(type_counts$n_banks, na.rm = TRUE) * 1.1) +
+  theme_minimal()
+```
+
+### Bank Status
+
+**Bank status (`bank_status`)** indicates where a mitigation or conservation bank stands in the regulatory process and determines whether credits from the bank are available for use. There is also **Bank status date (`bank_status_date`)** which provides the date in which the bank status was changed.
+
+-   **Approved**\
+    Active banks with an approved instrument (formal agreement with agencies).\
+    These banks are authorized to sell credits for compensatory mitigation.
+
+-   **Sold-Out**\
+    Banks that have sold all of their available credits.\
+    They remain in RIBITS for historical purposes but cannot provide new credits.
+
+-   **Pending**\
+    Proposed banks currently under review.\
+    Credits cannot yet be purchased, but these represent projects “in the pipeline.”
+
+-   **Withdrawn**\
+    Applications that were submitted but later withdrawn by the sponsor or rejected.\
+    These banks never became active.
+
+-   **Terminated**\
+    Banks that were once approved but have since been closed or terminated by regulators.\
+    Credits are no longer valid.
+
+-   **Suspended**\
+    Banks temporarily suspended, often due to compliance or legal issues.\
+    While suspended, the bank cannot sell credits; it may later be reinstated or permanently terminated.
+
+```{r}
+#| label: get-current-bank-status
+#| echo: true
+#| include: false
+
+# Get raw status data (before date filtering)
+bank_status_pre_filter <- data %>%
+  select(bank_id, bank_status, bank_status_date) %>%
+  filter(!is.na(bank_status) & bank_status != "")
+
+# total banks before filter
+n_banks_before_date_filter <- n_distinct(bank_status_pre_filter$bank_id)
+
+# Parse dates and filter out rows with invalid dates
+bank_status_raw <- bank_status_pre_filter %>%
+  filter(!is.na(bank_status_date))
+
+# Get current bank status 
+current_bank_status <- bank_status_raw %>%
+  group_by(bank_id) %>%
+  slice_max(order_by = bank_status_date, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+# Count current banks and number of banks dropped
+n_current_banks <- nrow(current_bank_status)
+n_banks_dropped <- n_banks_before_date_filter - n_current_banks
+
+# Get the counts for the "Current" banks (ones we kept)
+counts_current <- current_bank_status %>%
+  count(bank_status, name = "n_current_with_date")
+
+# Get the bank IDs of those we dropped
+dropped_bank_ids <- setdiff(bank_status_pre_filter$bank_id, current_bank_status$bank_id)
+
+# Now, get the status counts for *only* the dropped banks
+# We take one row per dropped bank to ensure we count 517 banks, not 517+ rows
+counts_dropped <- bank_status_pre_filter %>%
+  filter(bank_id %in% dropped_bank_ids) %>%
+  distinct(bank_id, .keep_all = TRUE) %>% # Get one status row per dropped bank
+  count(bank_status, name = "n_dropped_no_date")
+
+# Create the final comparison table
+status_comparison_table <- full_join(
+    counts_current,
+    counts_dropped,
+    by = "bank_status"
+  ) %>%
+  # Replace NAs with 0s for statuses that only exist in one group
+  mutate(
+    n_current_with_date = coalesce(n_current_with_date, 0),
+    n_dropped_no_date = coalesce(n_dropped_no_date, 0)
+  ) %>%
+  # Add a total
+  mutate(n_total = n_current_with_date + n_dropped_no_date) %>%
+  # Sort to show most common statuses first
+  arrange(desc(n_total))
+
+# Create the "after" summary (for the plot)
+status_summary_counts <- current_bank_status %>%
+  count(bank_status, sort = TRUE, name = "n_banks")
+
+# 7. Define the helper function
+inspect_bank_status <- function(bank_id) {
+  cat(glue("Inspecting raw status for bank_id: {bank_id}\n"))
+  bank_status_raw %>%
+    filter(bank_id == bank_id) %>%
+    arrange(desc(bank_status_date))
+}
+```
+
+Here, I check how many banks have a recorded and dated status entry. Of the `r n_banks_before_date_filter` banks that had status information, **`r n_banks_dropped` banks were excluded** from this analysis because they had no valid status date. The table below compares the statuses for the `r n_current_banks` banks we kept (those with valid dates) against the statuses listed for the `r n_banks_dropped` banks we had to drop.
+
+```{r}
+#| label: print-status-comparison-table
+#| echo: true
+
+  status_comparison_table %>%
+    gt() %>%
+    cols_label(
+      bank_status = "Bank Status",
+      n_current_with_date = "Kept (Has Date)",
+      n_dropped_no_date = "Dropped (No Date)",
+      n_total = "Total Banks"
+    ) %>%
+    fmt_number(columns = where(is.numeric), decimals = 0) %>%
+    # Add a summary row at the bottom to show totals
+    grand_summary_rows(
+      columns = c(n_current_with_date, n_dropped_no_date, n_total),
+      fns = list(label = "Total", fn = "sum"),
+      formatter = fmt_number, decimals = 0
+    ) %>%
+    style_table(
+      title = "**Bank Status: Kept vs. Dropped**",
+      subtitle = "Comparing banks with and without valid status dates"
+    )
+```
+
+Now let's check how these status events look by year:
+
+```{r}
+#| label: bank-status-events-per-year
+#| message: false
+#| warning: false
+#| echo: true
+#| fig.width: 8
+#| fig.height: 4
+
+# 1. Calculate events per year (This is the corrected part)
+#    We just use the existing all-caps column names.
+events_by_year <- current_bank_status %>%
+  mutate(year = year(bank_status_date)) %>%
+  count(year, bank_status, name = "n_events") %>%
+  arrange(year, bank_status)
+
+# 2. Plot the stacked bar chart of new events
+ggplot(events_by_year, aes(x = year, y = n_events, fill = bank_status)) +
+  geom_col() +
+  labs(
+    title = "New Bank Status Events Per Year",
+    subtitle = "Each bar shows the number of banks that received their status that year.",
+    x = "Year",
+    y = "Number of New Status Events",
+    fill = "Status"
+  ) +
+  scale_x_continuous(breaks = pretty(events_by_year$year, n = 8)) +
+  theme_minimal()
+```
+
+```{r}
+#| label: get-binned-summary-data
+#| echo: true
+#| include: false
+
+# 1. Get the min/max years from the data to build the bins
+year_data <- current_bank_status %>%
+  mutate(year = year(bank_status_date)) %>%
+  filter(!is.na(year)) # Make sure we only use dated events
+  
+min_year_in_data <- min(year_data$year)
+max_year_in_data <- max(year_data$year)
+
+# We'll start at 1980 as requested
+start_year <- 1980
+
+# 2. Define the 5-year break points
+# We want intervals [1980, 1985), [1985, 1990), etc.
+# This means 1980-1984, 1985-1989, etc.
+breaks <- seq(
+  from = start_year, 
+  to = max_year_in_data + 5, # Go one step past the max
+  by = 5
+)
+
+# 3. Create the binned summary table
+binned_summary_table <- year_data %>%
+  
+  # 4. Create the 'year_bin' column
+  mutate(
+    year_bin = cut(
+      year,
+      breaks = breaks,
+      # 'right = FALSE' means the interval is [start, end)
+      # e.g., [1980, 1985) which includes 1980, 81, 82, 83, 84
+      right = FALSE, 
+      # Create clear labels like "1980-1984"
+      labels = paste0(breaks[-length(breaks)], "-", breaks[-1] - 1)
+    )
+  ) %>%
+  
+  # Filter out any data before 1980
+  filter(!is.na(year_bin)) %>%
+
+  # 5. Count by the new bin and the status
+  count(year_bin, bank_status, name = "n_events") %>%
+  
+  # 6. Pivot to the format you want
+  pivot_wider(
+    names_from = bank_status,
+    values_from = n_events,
+    values_fill = 0 # Show 0 for empty status/bin combos
+  ) %>%
+  
+  # 7. Arrange by the bin
+  arrange(year_bin)
+```
+
+This table shows the same; it is **the number of bank status events** that occurred within each 5-year period.
+
+```{r}
+#| label: print-binned-summary-table
+#| echo: true
+
+  binned_summary_table %>%
+    gt() %>%
+    # Relabel the bin column to be clearer
+    cols_label(
+      year_bin = "5-Year Period"
+    ) %>%
+    # Format all number columns
+    fmt_number(
+      columns = where(is.numeric),
+      decimals = 0
+    ) %>%
+    # Use your custom theme function
+    style_table(
+      title = "**Bank Status Events by 5-Year Period**"
+    ) %>%
+    # Add a summary row at the bottom
+    grand_summary_rows(
+      columns = where(is.numeric),
+      fns = list(label = "Total", fn = "sum"),
+      formatter = fmt_number, decimals = 0
+    )
+```
+
+We can also see the cumulative trajectory - how many total banks are approved/pending/terminated/etc through time:
+
+```{r}
+#| label: bank-status-cumulative-trajectory
+#| message: false
+#| warning: false
+#| echo: true
+#| fig.width: 10
+#| fig.height: 6
+
+# Add the cumulative sum using the 'events_by_year' table from the chunk above
+cumulative_counts <- events_by_year %>%
+  # Add 0-count rows for missing year/status combos
+  complete(year, bank_status, fill = list(n_events = 0)) %>%
+  # Calculate the cumulative sum *within each status group*
+  group_by(bank_status) %>%
+  arrange(year) %>%
+  mutate(total_banks = cumsum(n_events)) %>%
+  ungroup()
+
+# Plot the cumulative trajectories
+ggplot(cumulative_counts, aes(x = year, y = total_banks, color = bank_status, group = bank_status)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  labs(
+    title = "Cumulative Bank Status Over Time",
+    subtitle = "Total number of banks in each state at the end of each year",
+    x = "Year",
+    y = "Total Number of Banks",
+    color = "Bank Status"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = pretty(cumulative_counts$year, n = 8)) +
+  theme(legend.position = "bottom")
+```
+
+### Bank Establishment
+
+The date of bank establishment is also helpful to understand the age of banks and trends over time.
+
+```{r}
+#| label: calculate-establishment-stats
+#| echo: true
+#| include: false
+
+# Create a dataframe of banks established
+banks_establish <- data %>%
+  st_drop_geometry() %>% # Drop geometry for faster processing
+  mutate(
+    est_date  = suppressWarnings(mdy(establishment_date)),
+    status_dt = suppressWarnings(mdy(bank_status_date)),
+    YEAR_EST2 = coalesce(year_established, year(est_date))
+  )
+
+# Get earliest known establishment year per bank
+year_by_bank <- banks_establish %>%
+  group_by(bank_id) %>%
+  summarise(
+    year_established = suppressWarnings(min(YEAR_EST2, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  # Convert Inf (from min(NA)) back to NA
+  mutate(year_established = ifelse(is.infinite(year_established), NA_integer_, year_established))
+
+# Get most recent reported status per bank
+status_by_bank <- banks_establish %>%
+  group_by(bank_id) %>%
+  arrange(desc(status_dt), .by_group = TRUE) %>%
+  summarise(
+    bank_status = first(na.omit(bank_status)), # Get first non-NA status
+    .groups = "drop"
+  )
+
+# Build the final 'bank_level' table
+bank_level <- data %>%
+  st_drop_geometry() %>%
+  distinct(bank_id, bank_name) %>%
+  left_join(year_by_bank,   by = "bank_id") %>%
+  left_join(status_by_bank, by = "bank_id")
+
+# Bank Age Analysis
+this_year <- lubridate::year(Sys.Date())
+bank_level <- bank_level %>%
+  mutate(bank_age = this_year - year_established)
+
+# Calculate all variables for prose, plots, and tables
+
+# Headline numbers for prose
+n_banks       <- n_distinct(bank_level$bank_id)
+n_with_year   <- sum(!is.na(bank_level$year_established))
+pct_with_year <- round(100 * n_with_year / n_banks, 1)
+year_min      <- min(bank_level$year_established, na.rm = TRUE)
+year_max      <- max(bank_level$year_established, na.rm = TRUE)
+
+# Summary stats for Bank Age
+age_summary_stats <- bank_level %>%
+  filter(!is.na(bank_age)) %>%
+  summarise(
+    avg_age    = mean(bank_age),
+    median_age = median(bank_age),
+    oldest     = max(bank_age),
+    youngest   = min(bank_age)
+  )
+
+# Table 1: Oldest banks
+oldest_banks_table <- bank_level %>%
+  filter(!is.na(bank_age)) %>%
+  select(bank_name, bank_id, year_established, bank_age) %>%
+  arrange(desc(bank_age)) %>%
+  head(10)
+
+# Table 2: Data Gaps (Missingness by status)
+missing_by_status_table <- bank_level %>%
+  summarise(
+    n_total     = n(),
+    n_missing   = sum(is.na(year_established)),
+    pct_missing = round(100 * n_missing / n_total, 1),
+    .by = bank_status
+  ) %>%
+  arrange(desc(pct_missing), desc(n_missing))
+
+# Plot 1: Data for establishment year histogram
+year_counts_for_plot <- bank_level %>%
+  filter(!is.na(year_established)) %>%
+  count(year_established, name = "n_banks")
+```
+
+We found `r n_with_year` of the `r n_banks` banks (`r pct_with_year`%) have a recorded establishment year. These dates range from `r year_min` to `r year_max`.
+
+The median age (as of 2025) for a bank with a known establishment date is `r round(age_summary_stats$median_age, 1)` years, with the oldest being `r age_summary_stats$oldest` years.
+
+This plot shows the number of new banks established each year:
+
+```{r}
+#| label: plot-establishment-year
+#| echo: true
+#| fig.width: 9
+#| fig.height: 5
+
+ggplot(year_counts_for_plot, aes(x = year_established, y = n_banks)) +
+  geom_col(color = "black", fill = "#0099F8") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + # Cleaner axis
+  labs(
+    title = "Distribution of Bank Establishment Years",
+    x = "Year Established",
+    y = "Number of Banks"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+This histogram shows the distribution of bank ages (as of `r this_year`):
+
+```{r}
+#| label: plot-bank-age-by-status
+#| echo: true
+#| fig.width: 10
+#| fig.height: 6
+
+ggplot(bank_level %>% filter(!is.na(bank_age)), aes(x = bank_age, fill = bank_status)) +
+  geom_histogram(
+    binwidth = 1,
+    color = "white", # White outlines for clarity
+    boundary = 0
+  ) +
+  labs(
+    title = "Bank Age Distribution by Status",
+    x = "Bank Age (Years)",
+    y = "Number of Banks",
+    fill = "Bank Status"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom") # Move legend to bottom for more space
+```
+
+It looks like most banks are under \~25 years, with some pushing 40. Note that many of the older banks are appear to be sold-out or terminated. Next, we can look at a few of the oldest banks:
+
+```{r}
+#| label: table-oldest-banks
+#| echo: true
+
+  oldest_banks_table %>%
+    gt() %>%
+    cols_label(
+      bank_name = "Bank Name",
+      bank_id = "Bank ID",
+      year_established = "Year Est.",
+      bank_age = "Age"
+    ) %>%
+    fmt_number(columns = c(bank_age, year_established), decimals = 0, sep_mark = "") %>%
+    style_table(
+      title = "**Oldest Banks in Dataset**",
+      subtitle = glue("As of {this_year}")
+    )
+```
+
+Finally, just to check the data quality of bank establishment year, I create a table showing what proportion of banks in each status (approved, pending, withdrawn, etc) are missing the establishment year in RIBITS.
+
+```{r}
+#| label: table-missing-year-status
+#| echo: true
+
+  missing_by_status_table %>%
+    gt() %>%
+    cols_label(
+      bank_status = "Bank Status",
+      n_total = "Total Banks",
+      n_missing = "Banks Missing Est. Year",
+      pct_missing = "Missing %"
+    ) %>%
+    fmt_number(columns = c(n_total, n_missing), decimals = 0) %>%
+    fmt_percent(columns = pct_missing, scale_values = FALSE, decimals = 1) %>%
+    style_table(
+      title = "**Missing Establishment Year by Bank Status**"
+    )
+```
+
+
+# Bank Cowardin Classes
+
+The Cowardin system is a hierarchical method for classifying wetland vegetation and habitats. Because a single mitigation bank may encompass several types of ecosystems, there might be multiple values in the Cowardin columns. The data below represents multi-value lists (comma-separated) for each bank.
+
+We analyze the four main hierarchy levels:
+
+- Systems: (`bank_cowardin_system_list`) - The broadest category describing the general hydrologic environment (e.g., Palustrine, Riverine, Estuarine).
+
+- Subsystems: (`bank_cowardin_subsystem_list`) - A subdivision of Systems based on water flow or flooding regimes (e.g., Tidal, Perennial, Intermittent). Note: The Palustrine system usually has no subsystem.
+
+- Classes: (`bank_cowardin_class_list`) - Describes the general appearance of the habitat in terms of either the dominant life form of the vegetation or the composition of the substrate (e.g., Emergent, Scrub-Shrub, Unconsolidated Bottom).
+
+- Subclasses: (`bank_cowardin_subclass_list`) - A finer distinction of the Class (e.g., Persistent, Broad-Leaved Deciduous).
+
+```{r}
+#| label: cowardin-analysis
+#| warning: false
+#| message: false
+#| echo: true
+
+# Define the columns of interest mapping to readable names
+cowardin_map <- c(
+  "bank_cowardin_system_list"    = "Systems",
+  "bank_cowardin_class_list"     = "Classes", 
+  "bank_cowardin_subsystem_list" = "Subsystems",
+  "bank_cowardin_subclass_list"  = "Subclasses"
+)
+
+# Helper function to calculate stats for ONE column
+calc_cowardin_stats <- function(col_name, label, df) {
+  vals <- df[[col_name]]
+  n_per_bank <- ifelse(is.na(vals) | vals == "", 0, str_count(vals, ",") + 1)
+  all_tokens <- vals[!is.na(vals) & vals != ""] %>% 
+    str_split(",\\s*") %>% unlist() %>% str_trim()
+  
+  tibble(
+    classification_level = label,
+    unique_types = n_distinct(all_tokens),
+    total_tags = length(all_tokens),
+    banks_with_data = sum(n_per_bank > 0),
+    pct_of_banks = mean(n_per_bank > 0),
+    avg_per_bank = mean(n_per_bank[n_per_bank > 0])
+  )
+}
+
+# Build summary table
+summary_df <- imap_dfr(cowardin_map, ~calc_cowardin_stats(.y, .x, data))
+
+# Create formatted summary table
+summary_df %>%
+  gt() %>%
+  cols_label(
+    classification_level = "Classification Level",
+    unique_types = "Unique Types",
+    total_tags = "Total Tags", 
+    banks_with_data = "Banks with Data",
+    pct_of_banks = "% of Banks",
+    avg_per_bank = "Avg per Bank"
+  ) %>%
+  fmt_number(columns = c(unique_types, total_tags, banks_with_data), decimals = 0) %>%
+  fmt_number(columns = c(avg_per_bank), decimals = 1) %>%
+  fmt_percent(columns = c(pct_of_banks), decimals = 1) %>%
+  style_table(
+    title = "**Cowardin Classification Data Availability**",
+    subtitle = glue("Data density across {n_banks} banks")
+  )
+```
+
+## Top Classifications by Level
+
+```{r}
+#| label: cowardin-top-classifications
+#| echo: true
+#| fig.width: 12
+#| fig.height: 8
+
+# Create tidy data for plotting
+plot_data <- data %>%
+  select(bank_id, all_of(names(cowardin_map))) %>%
+  pivot_longer(cols = -bank_id, names_to = "col_name", values_to = "value") %>%
+  filter(!is.na(value), value != "") %>%
+  separate_rows(value, sep = ",\\s*") %>%
+  mutate(
+    value = str_trim(value),
+    category = factor(cowardin_map[col_name], levels = c("Systems", "Subsystems", "Classes", "Subclasses"))
+  ) %>%
+  count(category, value) %>%
+  group_by(category) %>%
+  slice_max(n, n = 5) %>%
+  ungroup()
+
+# Create faceted plot
+ggplot(plot_data, aes(x = n, y = reorder_within(value, n, category))) +
+  geom_col(fill = "grey") +
+  geom_text(aes(label = n), hjust = -0.2, size = 4) +
+  scale_y_reordered() +
+  facet_wrap(~category, scales = "free", ncol = 2) +
+  labs(
+    title = "Top 5 Cowardin Classifications by Level",
+    x = "Number of Banks",
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(strip.text = element_text(face = "bold", size = 11)) +
+  expand_limits(x = max(plot_data$n) * 1.1)
+```
+
+## Classification Complexity Analysis
+
+```{r}
+#| label: cowardin-complexity
+#| echo: true
+
+# Function to analyze complexity per level
+analyze_complexity <- function(col_name, label) {
+  vals <- data[[col_name]]
+  n_per_bank <- ifelse(is.na(vals) | vals == "", 0, str_count(vals, ",") + 1)
+  
+  tibble(
+    classification_level = label,
+    single_classification = sum(n_per_bank == 1),
+    multiple_classifications = sum(n_per_bank > 1),
+    max_classifications = max(n_per_bank),
+    pct_multiple = mean(n_per_bank > 1)
+  )
+}
+
+# Calculate complexity for all levels
+complexity_df <- imap_dfr(cowardin_map, ~analyze_complexity(.y, .x))
+
+# Create complexity table
+complexity_df %>%
+  gt() %>%
+  cols_label(
+    classification_level = "Classification Level",
+    single_classification = "Single",
+    multiple_classifications = "Multiple", 
+    max_classifications = "Max per Bank",
+    pct_multiple = "% Multiple"
+  ) %>%
+  fmt_number(columns = c(single_classification, multiple_classifications, max_classifications), decimals = 0) %>%
+  fmt_percent(columns = c(pct_multiple), decimals = 1) %>%
+  style_table(
+    title = "**Classification Complexity Analysis**",
+    subtitle = "Banks with single vs multiple classifications by level"
+  )
+```
+
+## Key Findings
+
+The Cowardin classification analysis reveals several important patterns:
+
+1. **Data Coverage**: `r round(100 * summary_df$banks_with_data[summary_df$classification_level == "Systems"] / n_distinct(data$bank_id), 1)`% of banks have system-level data, with `r round(100 * summary_df$banks_with_data[summary_df$classification_level == "Classes"] / n_distinct(data$bank_id), 1)`% having class-level data, indicating good coverage of ecological habitat information.
+
+2. **Dominant Systems**: The `r summary_df$unique_types[summary_df$classification_level == "Systems"]` system dominates, representing the majority of all system classifications. This includes freshwater wetlands like marshes, swamps, and forested wetlands - the primary focus of mitigation banking.
+
+3. **Habitat Diversity**: Banks typically contain multiple habitat types, with an average of `r round(summary_df$avg_per_bank[summary_df$classification_level == "Classes"], 1)` classes per bank, reflecting the ecological complexity of mitigation sites.
+
+4. **Classification Complexity**: `r round(100 * complexity_df$pct_multiple[complexity_df$classification_level == "Classes"], 1)`% of banks have multiple class classifications, demonstrating that most mitigation banks encompass diverse habitat types rather than single ecosystems.
+
+# Types of Credits
+
+One thing the join allowed us to do was look at the types of credits available for each bank. The relevant columns here are `initiation_credits`, `initiation_acres`, and `initiation_feet`. We also have summary totals for `withdrawn_credits`, `tot_pot_credits_from_details`, and `tot_pot_credit_types`. 
+
+```{r}
+# Quick summary of credit types
+credit_summary <- data %>%
+  select(bank_id, initiation_credits, initiation_acres, initiation_feet, withdrawn_credits, total_pot_credits_from_details, total_pot_credit_types) %>%
+  filter(!is.na(initiation_credits)) %>%
+  summarise(
+    total_banks = n(),
+    banks_with_initiation = sum(!is.na(initiation_credits)),
+    avg_initiation_credits = mean(initiation_credits, na.rm = TRUE),
+    total_initiation_acres = sum(initiation_acres, na.rm = TRUE),
+    total_initiation_feet = sum(initiation_feet, na.rm = TRUE)
+  )
+
+credit_summary
+```
+
+```{r}
+# Show some examples of credit data
+data %>%
+  select(bank_id, initiation_credits, initiation_acres, initiation_feet, withdrawn_credits, total_pot_credits_from_details, total_pot_credit_types) %>%
+  filter(!is.na(initiation_credits)) %>%
+  head(10) %>%
+  gt()
+```
+
+
+
+# load the contact details data
+
+```{r}
+bank_pocs <- readRDS(here(
+  "data", "data_intermediate", "bank_pocs.rds"
+))
+
+bank_sponsors <- readRDS(here(
+  "data", "data_intermediate", "bank_sponsors.rds"
+))
+
+View(bank_sponsors)
+
+View(bank_pocs)
+
+unique(bank_pocs$POC_TYPE)
+
+```
+
+# Summary and Next Steps
+
+This report provided a fairly high-level summary of the main RIBITS raw GeoJson extract. We looked at spatial data availability, bank kinds, types, establishment years, and status through time.
+
+In terms of next steps:
+
+There is a lot of data still available on RIBITS that wasn't able to be extracted via the GeoJson API. It might be worth manually downloading all available files, cleaning and harmonizing them, and then joining them to the main RIBITS dataframe to get a more comprehensive look a the banks. For example, we don't have any information on if the banks are stream vs wetland mitigation banks, what type of wetland ecological characteristics are available, or more specific credit information.
+
+For further downstream analysis, it also might be worth cleaning up the geospatial elements. This would include:
+
+- Removing/replacing all clearly incorrect footprint geometries with service area geometries
+- Deciding what an acceptable "margin of error" will be for discrepancies between footprint area values
+- Imputing bank footprint areas (i.e., drawing a circle around the centroid) using the value listed in the "total acres" column when no footprint geometry is available
