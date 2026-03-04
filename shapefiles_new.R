@@ -15,10 +15,10 @@ folder_path <- "Shapefiles"
 
 #st_write(footprints, dsn="bank_footprints.gpkg", layer='bank_footprints')
 
-foot_gkpg <- here("Mbiol Backup/raw_data/bank_footprints.gpkg")
+foot_gkpg <- here("raw_data/bank_footprints.gpkg")
 footprints <- st_read(foot_gkpg, layer = "bank_footprints", quiet = TRUE)
 
-ribits_data_simplified <- read.csv("Mbiol Backup/raw_data/ribits_data_simplified.csv")
+ribits_data_simplified <- read.csv(raw_data/ribits_data_simplified.csv")
 dedup_ribits <- distinct(ribits_data_simplified, bank_id, .keep_all = T)
 
 
