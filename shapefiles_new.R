@@ -18,18 +18,15 @@ folder_path <- "Shapefiles"
 foot_gkpg <- here("raw_data/bank_footprints.gpkg")
 footprints <- st_read(foot_gkpg, layer = "bank_footprints", quiet = TRUE)
 
-ribits_data_simplified <- read.csv(raw_data/ribits_data_simplified.csv")
+ribits_data_simplified <- read.csv("raw_data/ribits_data_simplified.csv")
 dedup_ribits <- distinct(ribits_data_simplified, bank_id, .keep_all = T)
 
 
 #split it to just look at one state - South Dakota - and its banks
 SD_ribits <- dedup_ribits %>%
-  filter(state_list == "SD")
-
-combined <- inner_join(footprints, SD_ribits, by = "bank_id")
-
-SD_ribits <- combined
-
+  filter(state_list == "SD") %>%
+  #filter so that only banks with known footprints are provided 
+  inner_join(footprints, SD_ribits, by = "bank_id")
 
 # Required packages
 library(sf)
