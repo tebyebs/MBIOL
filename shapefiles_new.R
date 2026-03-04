@@ -28,6 +28,9 @@ SD_ribits <- dedup_ribits %>%
   #filter so that only banks with known footprints are provided 
   inner_join(footprints, SD_ribits, by = "bank_id")
 
+#read this as an sf object  
+SD_ribits <- st_as_sf(SD_ribits)
+
 # Required packages
 library(sf)
 library(dplyr)

@@ -11,7 +11,7 @@ which(!sf::st_is_valid(footprints))
 fix_footprints <- st_make_valid(footprints)
 dedup_footprints <- distinct(fix_footprints, bank_id, .keep_all = T)
 dedup_footprints <- dedup_footprints %>% 
-  select(-bank_id)
+  select(-bank_name)
 
 #st_write(dedup_footprints, dsn="bank_footprints.gpkg", layer='bank_footprints')
 
