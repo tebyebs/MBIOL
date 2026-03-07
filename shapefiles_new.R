@@ -101,8 +101,8 @@ fish_by_species <- fish_combined %>%
   st_as_sf()
 
 # Optionally make valid (fix geometry issues)
-fish_by_species$geom <- st_make_valid(fish_by_species$geometry)
-SD_ribits$geom <- st_make_valid(SD_ribits$geometry)
+fish_by_species$geometry <- st_make_valid(fish_by_species$geometry)
+SD_ribits$geom <- st_make_valid(SD_ribits$geom)
 
 # -------------------------
 # 4. Compute intersections (bank x species)

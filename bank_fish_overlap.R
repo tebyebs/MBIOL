@@ -25,19 +25,19 @@ sf_use_s2(FALSE)
 options(warn = -1)  # suppress "planar coordinates" messages
 
 # Set up file paths, change for your own files
-
-gpkg_path <- "bank_geometries.gpkg"
-fish_dir  <- "fish_shapefiles/Shapefiles"
+geom_path <- "raw_data/bank_locations.gpkg"
+gpkg_path <- "raw_data/bank_footprints.gpkg"
+fish_dir  <- "Shapefiles"
 out_dir   <- "output"
 
 # Create output directory
 dir.create(out_dir, showWarnings = FALSE)
 
-
 # Load bank data
 
 # Centroids
-centroids  <- st_read(gpkg_path, layer = "bank_centroids", quiet = TRUE)
+centroids  <- st_read(geom_path, layer = "bank_geoms", quiet = TRUE)
+centroids <- distinct(centroids, bank_id, .keep_all = T)
 # Footprints
 footprints <- st_read(gpkg_path, layer = "bank_footprints", quiet = TRUE)
 
@@ -54,6 +54,9 @@ footprints <- st_make_valid(footprints)
 # Calculate each footprint's area (in m2) using an equal-area projection
 # We need this later to compute % overlap
 footprints$area_m2 <- as.numeric(st_area(st_transform(footprints, 5070)))
+#filter out larger banks (>50km2)
+footprints <- footprints %>%
+  filter(area_m2 <= 50 * 1e6)
 
 # Get list of all fish species files and print how many
 shp_files <- list.files(fish_dir, pattern = "[.]shp$", full.names = TRUE)
@@ -90,16 +93,43 @@ for (i in seq_along(shp_files)) {
 
   if (length(hit_banks) > 0) {
     centroid_results[[length(centroid_results) + 1]] <- data.frame(
-      bank_id     = centroids$BANK_ID[hit_banks],
-      bank_name   = centroids$BANK_NAME[hit_banks],
-      state       = centroids$STATE_LIST[hit_banks],
-      district    = centroids$DISTRICT[hit_banks],
+      bank_id     = centroids$bank_id[hit_banks],
+
       species     = species,
       common_name = common_name,
       stringsAsFactors = FALSE
     )
   }
 }
+
+#############################################
+
+
+
+# combine results into one data.frame (or empty df if none)
+if (length(centroid_results) > 0) {
+  centroid_results_df <- bind_rows(centroid_results)
+} else {
+  centroid_results_df <- data.frame(
+    bank_id = character(0),
+    bank_name = character(0),
+    state = character(0),
+    district = character(0),
+    species = character(0),
+    common_name = character(0),
+    stringsAsFactors = FALSE
+  )
+}
+
+# inspect
+print(head(centroid_results_df))
+
+
+
+
+
+
+
 
 # bind together
 centroid_df <- do.call(rbind, centroid_results)
