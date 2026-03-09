@@ -81,7 +81,7 @@ fish_by_species <- fish_combined %>%
   summarise(geometry = st_union(geometry), .groups = "drop") %>%
   st_as_sf()
 
-#map these fish 
+#map these fish DONT DO THIS AS IT CRASHERS R
 
 ggplot() +
   geom_sf(data = fish_by_species, aes(fill = species), alpha = 0.18, color = NA, show.legend = FALSE) +
