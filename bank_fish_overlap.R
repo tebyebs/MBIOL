@@ -31,7 +31,7 @@ fish_dir  <- "Shapefiles"
 out_dir   <- "output"
 
 # Create output directory
-dir.create(out_dir, showWarnings = FALSE)
+#dir.create(out_dir, showWarnings = FALSE)
 
 # Load bank data
 
@@ -250,3 +250,8 @@ print(
 )
 
 options(warn = 0)
+
+library(dplyr)
+########################
+ribits_data_simplified %>%
+  count(credit_type_list, sort = TRUE)
