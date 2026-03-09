@@ -18,6 +18,10 @@
 
 # Load packages
 library(sf)
+library(purrr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
 
 # Turn off spherical geometry, as some bank shapes have errors that
 # cause crashes with the S2 engine.
@@ -62,6 +66,43 @@ footprints <- footprints %>%
 shp_files <- list.files(fish_dir, pattern = "[.]shp$", full.names = TRUE)
 cat(sprintf("Found %d fish species shapefiles\n\n", length(shp_files)))
 
+#get other fish data
+fish_list <- map(shp_files, ~ st_read(.x, quiet = TRUE) %>%
+  mutate(species = tools::file_path_sans_ext(basename(.x))))
+fish_combined <- bind_rows(fish_list)
+
+#mapping all of the fish
+
+# Union fish polygons by species (prevents double counting / speeds up intersection)
+# -------------------------
+# Some shapefiles might have multiple polygons per species; we create one MULTIPOLYGON per species.
+fish_by_species <- fish_combined %>%
+  group_by(species) %>%
+  summarise(geometry = st_union(geometry), .groups = "drop") %>%
+  st_as_sf()
+
+#map these fish 
+
+ggplot() +
+  geom_sf(data = fish_by_species, aes(fill = species), alpha = 0.18, color = NA, show.legend = FALSE) +
+  theme_minimal()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ANALYSIS 1: Centroid overlap
 # For each species: load its range, check which bank center points fall inside.
@@ -103,6 +144,7 @@ for (i in seq_along(shp_files)) {
 }
 
 #############################################
+
 
 
 
