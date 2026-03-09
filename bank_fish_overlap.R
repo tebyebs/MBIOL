@@ -81,14 +81,14 @@ fish_by_species <- fish_combined %>%
   summarise(geometry = st_union(geometry), .groups = "drop") %>%
   st_as_sf()
 
+#remove extra fish datasets to preserve memory
+rm(fish_combined)
+
 #map these fish DONT DO THIS AS IT CRASHERS R
 
-ggplot() +
-  geom_sf(data = fish_by_species, aes(fill = species), alpha = 0.18, color = NA, show.legend = FALSE) +
-  theme_minimal()
-
-
-
+#ggplot() +
+ # geom_sf(data = fish_by_species, aes(fill = species), alpha = 0.18, color = NA, show.legend = FALSE) +
+  #theme_minimal()
 
 
 
@@ -165,11 +165,6 @@ if (length(centroid_results) > 0) {
 
 # inspect
 print(head(centroid_results_df))
-
-
-
-
-
 
 
 
