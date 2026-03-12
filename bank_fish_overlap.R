@@ -65,9 +65,10 @@ footprints <- footprints %>%
 # Get list of all fish species files and print how many
 shp_files <- list.files(fish_dir, pattern = "[.]shp$", full.names = TRUE)
 cat(sprintf("Found %d fish species shapefiles\n\n", length(shp_files)))
+files20 <- head(shp_files, 20)
 
 #get other fish data
-fish_list <- map(shp_files, ~ st_read(.x, quiet = TRUE) %>%
+fish_list <- map(files20, ~ st_read(.x, quiet = TRUE) %>%
   mutate(species = tools::file_path_sans_ext(basename(.x))))
 fish_combined <- bind_rows(fish_list)
 
@@ -78,8 +79,10 @@ fish_combined <- bind_rows(fish_list)
 # Some shapefiles might have multiple polygons per species; we create one MULTIPOLYGON per species.
 fish_by_species <- fish_combined %>%
   group_by(species) %>%
-  summarise(geometry = st_union(geometry), .groups = "drop") %>%
+  summarise(geometry = st_union(geometry, .groups = "drop")) %>%
   st_as_sf()
+
+
 
 #remove extra fish datasets to preserve memory
 rm(fish_combined)
