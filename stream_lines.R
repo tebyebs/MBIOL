@@ -23,9 +23,16 @@ plot_crs <- 5070                                             # US Albers (EPSG:5
 flowfile <- "nhdplus/a0000001d.gdbtable"
 flowlines <- terra::vect(flowfile, proxy = T)
 
-# S4 method for class 'SpatVectorProxy'
-query(flowlines, start=1, n=nrow(flowlines), vars=NULL, where=NULL, 
-      extent=NULL, filter=NULL, sql=NULL, dialect="", what="")
+#converts the fish data into terra for use in analysis
+shp_files <- list.files("Shapefiles", pattern="\\.shp$", full.names=TRUE)
+fish20 <- head(shp_files, 20)
+fish_list <- lapply(fish20, vect)
+
+fish_combined <- do.call(rbind, fish_list)
+
+# if you run this as is will crash R
+# going to have to subset this 
+#query(flowlines, filter=fish_list[[1]], what="")
 
 # ensure same CRS
 flowlines <- st_transform(flowlines, st_crs(5070))
