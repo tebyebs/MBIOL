@@ -6,6 +6,8 @@ library(sf)
 library(dplyr)
 library(ggplot2)
 library(here)
+library(terra)    # raster operations
+library(stars) 
 
 # ---- USER SETTINGS ----
 fish_shp <- "Shapefiles/Acantharchus_pomotis.shp"  # might need to change this to be shapefile specific
@@ -15,10 +17,18 @@ plot_crs <- 5070                                             # US Albers (EPSG:5
 # ------------------------
 
 # read stream network (you must download NHD/NHDPlus flowlines beforehand)
-flowlines <- st_read("C:/path/to/Flowlines/flowlines.shp")
+#this might break r
+
+#flowlines <- st_read("nhdplus/a0000001d.gdbtable")
+flowfile <- "nhdplus/a0000001d.gdbtable"
+flowlines <- terra::vect(flowfile, proxy = T)
+
+# S4 method for class 'SpatVectorProxy'
+query(flowlines, start=1, n=nrow(flowlines), vars=NULL, where=NULL, 
+      extent=NULL, filter=NULL, sql=NULL, dialect="", what="")
 
 # ensure same CRS
-flowlines <- st_transform(flowlines, st_crs(fish_poly))
+flowlines <- st_transform(flowlines, st_crs(5070))
 
 # select only those flowlines that intersect the polygon
 streams_in_poly <- st_intersection(st_make_valid(flowlines), st_union(st_make_valid(fish_poly)))
