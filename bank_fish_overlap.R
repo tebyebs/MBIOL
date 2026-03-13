@@ -68,9 +68,9 @@ cat(sprintf("Found %d fish species shapefiles\n\n", length(shp_files)))
 files20 <- head(shp_files, 20)
 
 #get other fish data
-fish_list <- map(files20, ~ st_read(.x, quiet = TRUE) %>%
+fish_list_st <- map(files20, ~ st_read(.x, quiet = TRUE) %>%
   mutate(species = tools::file_path_sans_ext(basename(.x))))
-fish_combined <- bind_rows(fish_list)
+fish_combined_st <- bind_rows(fish_list_st)
 
 #mapping all of the fish
 
