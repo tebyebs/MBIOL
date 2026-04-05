@@ -28,13 +28,14 @@ ribits_data <- ribits_data %>%
 
 #filter only approved banks 
 ribits_data <- ribits_data %>%
-  filter(bank_status %in% c("Approved", "Sold-Out"),
-         year_established > 1995)
+  filter(bank_status %in% c("Approved", "Sold-Out"), #only approved banks
+         year_established > 1995, #established after the 1995 USACE guidelines were established
+         #kind_of_bank != "ILF"), #this would remove ILF banks BUT off rn as were categorising all banks
+         !is.na(sponsor_name)) #remove NA values in sponsor name 
 
-ribits_data_mismatch <- ribits_data %>%
-  filter(!coalesce(establishment_date == bank_status_date, FALSE))
 
 
- #NA in sponsor, approved banks and required information available, banks taken after 1995 USACE guidelines and not ILF ones
+
+ 
 
 
