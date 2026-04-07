@@ -44,9 +44,19 @@ ribits_data_private <- ribits_data %>%
 single_client <- ribits_data %>%
   filter(bank_type %in% "Single-Client") #just to check if it should be included - mostly public, some private 
 
-sponsor_counts <- ribits_data_private %>%
+private_counts <- ribits_data_private %>%
   count(sponsor_name, sort = TRUE)
 
+#Truncating the file and writing it in a more compact format to allow analysis in ChatGPT
+result <- paste(
+  c(rbind(private_counts$sponsor_name, private_counts$n)),
+  collapse = ", "
+)
+#write(result, file = "private_list") - this
+
+#Lots of organisations separated when they shouldn't have been - used Chat to organise them into similar categories
  
+private_counts[126,1] #First Pennsylvania Resource Example - other first Pen entries with unique ids
+
 
 
