@@ -29,7 +29,7 @@ ribits_data <- ribits_data %>%
 #filter only approved banks 
 ribits_data <- ribits_data %>%
   filter(bank_status %in% c("Approved", "Sold-Out"), #only approved banks and sold out
-         year_established > 1995, #established after the 1995 USACE guidelines were established
+         year_established > 2009, #established after the 1995 USACE guidelines were established
          #kind_of_bank != "ILF"), #this would remove ILF banks BUT off as were categorizing all banks
          !is.na(sponsor_name)) #remove NA values in sponsor name 
 
@@ -37,6 +37,11 @@ ribits_data <- ribits_data %>%
 ### STEP 2 - ORGANISING SPONSORS BY NUMBERS OF BANKS
 
 table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
+
+
+ledger_counts <- harmonized_ribits_ledgers %>%
+  count(credit_classification_or_subdivision)
+
 
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
