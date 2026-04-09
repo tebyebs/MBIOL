@@ -38,11 +38,6 @@ ribits_data <- ribits_data %>%
 
 table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
 
-
-ledger_counts <- harmonized_ribits_ledgers %>%
-  count(credit_classification_or_subdivision)
-
-
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
 
@@ -63,5 +58,9 @@ private_counts <- ribits_data_private %>%
  
 private_counts[126,1] #First Pennsylvania Resource Example - other first Pen entries with unique ids
 
+ledger_counts <- harmonized_ribits_ledgers %>% #checking which credit classifications to compare for the functional density analysis
+  count(credit_classification_or_subdivision)
 
+
+#write.csv(ribits_data_private, file = "private_sponsor_categories.csv") write a file for excel analysis
 
