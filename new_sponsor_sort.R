@@ -29,7 +29,7 @@ ribits_data <- ribits_data %>%
 #filter only approved banks 
 ribits_data <- ribits_data %>%
   filter(bank_status %in% c("Approved", "Sold-Out"), #only approved banks and sold out
-         year_established > 2009, #established after the 1995 USACE guidelines were established
+         year_established > 1995, #established after the 1995 USACE guidelines were established
          #kind_of_bank != "ILF"), #this would remove ILF banks BUT off as were categorizing all banks
          !is.na(sponsor_name)) #remove NA values in sponsor name 
 
@@ -53,10 +53,10 @@ private_counts <- ribits_data_private %>%
   count(sponsor_name, sort = TRUE)
 
 #Truncating the file and writing it in a more compact format to allow analysis in ChatGPT
-result <- paste(
-  c(rbind(private_counts$sponsor_name, private_counts$n)),
-  collapse = ", "
-)
+#result <- paste(
+#  c(rbind(private_counts$sponsor_name, private_counts$n)),
+#  collapse = ", "
+#)
 #write(result, file = "private_list") - this
 
 #Lots of organisations separated when they shouldn't have been - used Chat to organise them into similar categories
