@@ -47,20 +47,7 @@ single_client <- ribits_data %>%
 private_counts <- ribits_data_private %>%
   count(sponsor_name, sort = TRUE)
 
-#Truncating the file and writing it in a more compact format to allow analysis in ChatGPT
-#result <- paste(
-#  c(rbind(private_counts$sponsor_name, private_counts$n)),
-#  collapse = ", "
-#)
-#write(result, file = "private_list") - this
-
-#Lots of organisations separated when they shouldn't have been - used Chat to organise them into similar categories
- 
-private_counts[126,1] #First Pennsylvania Resource Example - other first Pen entries with unique ids
-
 ledger_counts <- harmonized_ribits_ledgers %>% #checking which credit classifications to compare for the functional density analysis
   count(credit_classification_or_subdivision)
 
-
-#write.csv(ribits_data_private, file = "private_sponsor_categories.csv") write a file for excel analysis
 
