@@ -47,9 +47,6 @@ ribits_data_private <- ribits_data %>%
 private_counts <- ribits_data_private %>%
   count(sponsor_name, sort = TRUE)
 
-ledger_counts <- harmonized_ribits_ledgers %>% #checking which credit classifications to compare for the functional density analysis
-  count(credit_classification_or_subdivision)
-
 ### DATA SORTED MANUALLY IN EXCEL
 ### STEP 3 - CREATE PRIVATE BANKS FILE AND BEGIN FUNCTIONAL DENSITY ANALYSIS
 pe_sponsors <- read.csv("raw_data/pe_sponsors.csv")
@@ -143,6 +140,37 @@ pe_summary %>%
   ) #%>%
   #gtsave("pe_summary_table.html") save if needed
 
+#how many unique private entities? roughly since they need more merging
+private_counts <- private_sponsors %>%
+  count(sponsor_name, sort = TRUE)
+
 ### PART 4 FUNCTIONAL DENSITY ANALYSIS
 # load in ribits ledger
+
+ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
+
+ledger_counts <- ledger %>% #checking which credit classifications to compare for the functional density analysis
+  count(credit_classification_or_subdivision)
+
+#filter to remove NAs in credits or acres, as well as banks with 0 acres
+
+ledger <- ledger %>%
+  filter(
+    credit_classification_or_subdivision %in% c("Wetlands", "Stream"),
+    !is.na(credits), 
+    !is.na(acres),
+    acres !=0
+  )
+
+#calculate credit acres
+
+ledger <- ledger %>%
+  mutate(credit_acres = credits / acres)
+
+functional_density <- ledger %>%
+  group_by(bank_id, credit_classification_or_subdivision) %>%
+  summarise(
+    avg_credit_acres = mean(credit_acres, na.rm = TRUE),
+    .groups = "drop"
+  )
 
