@@ -167,6 +167,7 @@ ledger <- ledger %>%
 ledger <- ledger %>%
   mutate(credit_acres = credits / acres)
 
+#create avg of credit acres across banks
 functional_density <- ledger %>%
   group_by(bank_id, credit_classification_or_subdivision) %>%
   summarise(
@@ -174,3 +175,14 @@ functional_density <- ledger %>%
     .groups = "drop"
   )
 
+
+pe_functional_density <- functional_density %>%
+  semi_join(pe_sponsors, by = "bank_id")
+
+pe_density_summary <- pe_functional_density %>%
+  filter(credit_classification_or_subdivision %in% c("Wetlands", "Stream")) %>%
+  group_by(credit_classification_or_subdivision) %>%
+  summarise(
+    avg_credit_acres = mean(avg_credit_acres, na.rm = TRUE),
+    .groups = "drop"
+  )
