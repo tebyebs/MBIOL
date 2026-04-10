@@ -105,15 +105,43 @@ all_sponsors <- bind_rows(
 )
 
 #create a table showing the differing sponsor names associated with each PE owner
-
 pe_summary <- pe_sponsors %>%
-  count(pe_owner, sponsor_name, sort = TRUE) %>%
+  count(pe_owner, sponsor_name) %>%
+  arrange(pe_owner, desc(n)) %>%
   group_by(pe_owner) %>%
   summarise(
-    sponsor_names = paste(sponsor_name, collapse = ", "),
+    sponsor_names = paste0(sponsor_name, " (", n, ")", collapse = ", "),
     .groups = "drop"
   )
 
+
+#export this table
+library(gt)
+
+pe_summary %>%
+  gt() %>%
+  # Rename columns
+  cols_label(
+    pe_owner = "Private Equity Owner",
+    sponsor_names = "Affiliated Sponsor Name Entries"
+  ) %>%
+  # Replace abbreviations in pe_owner column
+  text_transform(
+    locations = cells_body(columns = pe_owner),
+    fn = function(x) {
+      dplyr::recode(
+        x,
+        "ARC" = "Arc Ventures",
+        "DCG" = "Domain Capital Group",
+        "EIP" = "Ecosystem Investment Partners",
+        "RES" = "Resource Environmental Solutions"
+      )
+    }
+  ) %>%
+  tab_header(
+    title = "Sponsor Names by Private Equity Owner"
+  ) #%>%
+  #gtsave("pe_summary_table.html") save if needed
 
 ### PART 4 FUNCTIONAL DENSITY ANALYSIS
 # load in ribits ledger
