@@ -36,13 +36,13 @@ ribits_data <- ribits_data %>%
 ### DATA READY FOR SORTING 
 ### STEP 2 - ORGANISING SPONSORS BY NUMBERS OF BANKS
 
-table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
+  # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
 
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
 
-single_client <- ribits_data %>%
-  filter(bank_type %in% "Single-Client") #just to check if it should be included - mostly public, some private 
+#single_client <- ribits_data %>%
+ # filter(bank_type %in% "Single-Client") #just to check if it should be included - mostly public, some private 
 
 private_counts <- ribits_data_private %>%
   count(sponsor_name, sort = TRUE)
@@ -50,4 +50,71 @@ private_counts <- ribits_data_private %>%
 ledger_counts <- harmonized_ribits_ledgers %>% #checking which credit classifications to compare for the functional density analysis
   count(credit_classification_or_subdivision)
 
+### DATA SORTED MANUALLY IN EXCEL
+### STEP 3 - CREATE PRIVATE BANKS FILE AND BEGIN FUNCTIONAL DENSITY ANALYSIS
+pe_sponsors <- read.csv("raw_data/pe_sponsors.csv")
+public_sponsors <- read.csv("raw_data/public_sponsors.csv")
+
+#preparing private,pe, public database
+private_sponsors <- ribits_data_private %>%
+  mutate(
+    pe_owner = "no",
+    listing  = "no",
+    private = "yes"
+  )
+
+pe_sponsors <- pe_sponsors %>%
+  mutate(
+    listing  = "no",
+    private = "no"
+  )
+
+public_sponsors <- public_sponsors %>%
+  mutate(
+    pe_owner = "no",
+    private = "no"
+  )
+
+private_sponsors <- private_sponsors %>%
+  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
+  mutate(zip_poc = as.character(zip_poc))
+
+
+pe_sponsors <- pe_sponsors %>%
+  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
+  mutate(zip_poc = as.character(zip_poc))
+
+
+public_sponsors <- public_sponsors %>%
+  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
+  mutate(zip_poc = as.character(zip_poc))
+
+
+#removes bank ids from private that were in pe or pub
+
+private_sponsors <- private_sponsors %>%
+  filter(
+    !bank_id %in% c(pe_sponsors$bank_id, public_sponsors$bank_id)
+  )
+
+#combines sponsors
+all_sponsors <- bind_rows(
+  private_sponsors,
+  pe_sponsors,
+  public_sponsors
+)
+
+#create a table showing the differing sponsor names associated with each PE owner
+
+pe_summary <- pe_sponsors %>%
+  count(pe_owner, sponsor_name, sort = TRUE) %>%
+  group_by(pe_owner) %>%
+  summarise(
+    sponsor_names = paste(sponsor_name, collapse = ", "),
+    .groups = "drop"
+  )
+
+
+### PART 4 FUNCTIONAL DENSITY ANALYSIS
+# load in ribits ledger
 
