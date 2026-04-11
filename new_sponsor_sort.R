@@ -186,3 +186,5 @@ pe_density_summary <- pe_functional_density %>%
     avg_credit_acres = mean(avg_credit_acres, na.rm = TRUE),
     .groups = "drop"
   )
+
+#compare to public and non-profit
