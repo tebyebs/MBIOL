@@ -4,7 +4,8 @@ library(janitor)               # Data cleaning
 library(purrr)                 # Functional programming
 library(ggplot2)               # Data visualization
 library(here)                  # File path handling
-library(tidyr)     
+library(tidyr) 
+library(gt)
 
 #Load the raw data
 ribits_data <- read.csv("raw_data/ribits_data_simplified.csv") 
@@ -36,7 +37,7 @@ ribits_data <- ribits_data %>%
 ### DATA READY FOR SORTING 
 ### STEP 2 - ORGANISING SPONSORS BY NUMBERS OF BANKS
 
-  # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
+# table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
 
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
@@ -94,6 +95,7 @@ private_sponsors <- private_sponsors %>%
     !bank_id %in% c(pe_sponsors$bank_id, public_sponsors$bank_id)
   )
 
+
 #combines sponsors
 all_sponsors <- bind_rows(
   private_sponsors,
@@ -110,10 +112,6 @@ pe_summary <- pe_sponsors %>%
     sponsor_names = paste0(sponsor_name, " (", n, ")", collapse = ", "),
     .groups = "drop"
   )
-
-
-#export this table
-library(gt)
 
 pe_summary %>%
   gt() %>%
@@ -144,47 +142,10 @@ pe_summary %>%
 private_counts <- private_sponsors %>%
   count(sponsor_name, sort = TRUE)
 
-### PART 4 FUNCTIONAL DENSITY ANALYSIS
-# load in ribits ledger
+#create a list for chatgpt
+result <- paste(
+  c(rbind(private_counts$sponsor_name, private_counts$n)),
+  collapse = ", "
+)
 
-ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
-
-ledger_counts <- ledger %>% #checking which credit classifications to compare for the functional density analysis
-  count(credit_classification_or_subdivision)
-
-#filter to remove NAs in credits or acres, as well as banks with 0 acres
-
-ledger <- ledger %>%
-  filter(
-    credit_classification_or_subdivision %in% c("Wetlands", "Stream"),
-    !is.na(credits), 
-    !is.na(acres),
-    acres !=0
-  )
-
-#calculate credit acres
-
-ledger <- ledger %>%
-  mutate(credit_acres = credits / acres)
-
-#create avg of credit acres across banks
-functional_density <- ledger %>%
-  group_by(bank_id, credit_classification_or_subdivision) %>%
-  summarise(
-    avg_credit_acres = mean(credit_acres, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-
-pe_functional_density <- functional_density %>%
-  semi_join(pe_sponsors, by = "bank_id")
-
-pe_density_summary <- pe_functional_density %>%
-  filter(credit_classification_or_subdivision %in% c("Wetlands", "Stream")) %>%
-  group_by(credit_classification_or_subdivision) %>%
-  summarise(
-    avg_credit_acres = mean(avg_credit_acres, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-#compare to public and non-profit
+write(result, file = "private_sponsors.txt")
