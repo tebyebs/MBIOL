@@ -26,6 +26,7 @@ ribits_data <- ribits_data %>%
       select(bank_id, year_established, kind_of_bank),
     by = "bank_id"
   )
+table(ribits_data$bank_status)
 
 #filter only approved banks 
 ribits_data <- ribits_data %>%
@@ -148,4 +149,4 @@ result <- paste(
   collapse = ", "
 )
 
-write(result, file = "private_sponsors.txt")
+write.csv(private_sponsors, file = "private_sponsors.csv")
