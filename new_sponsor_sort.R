@@ -26,7 +26,36 @@ ribits_data <- ribits_data %>%
       select(bank_id, year_established, kind_of_bank),
     by = "bank_id"
   )
-table(ribits_data$bank_status)
+
+###OPTIONAL
+###FILTERING ALL BANKS
+sum(is.na(ribits_data$sponsor_name) & is.na(ribits_data$email_poc)) #887 instances of both no sponsor or poc 
+
+ribits_data_total <- ribits_data %>%
+  filter(
+    !(is.na(sponsor_name) & is.na(email_poc)),
+    year_established > 1995
+  ) %>%
+  mutate(  #additional columns for analysis
+    pe_owner = "no",
+    listing = "no",
+    private = if_else(bank_type %in% c("Private Commercial", "Combination Public/Private"), "yes", "no"),
+    govt = if_else(bank_type == "Public Commercial", "yes", "no"),
+    nonprofit = if_else(bank_type == "Private Nonprofit", "yes", "no"),
+    sponsor_type = case_when(
+      private == "yes" ~ "private",
+      govt == "yes" ~ "govt",
+      nonprofit == "yes" ~ "nonprofit",
+      TRUE ~ "single"
+    )
+  )
+#export file for analysis
+#write.csv(ribits_data_total, file = "all_sponsors.csv")
+
+
+
+
+write.csv()
 
 #filter only approved banks 
 ribits_data <- ribits_data %>%
@@ -38,7 +67,7 @@ ribits_data <- ribits_data %>%
 ### DATA READY FOR SORTING 
 ### STEP 2 - ORGANISING SPONSORS BY NUMBERS OF BANKS
 
-# table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
+# table(ribits_data_filt$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
 
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
@@ -144,4 +173,4 @@ private_counts <- private_sponsors %>%
   count(sponsor_name, sort = TRUE)
 
 
-write.csv(private_sponsors, file = "private_sponsors.csv")
+
