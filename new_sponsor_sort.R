@@ -143,10 +143,5 @@ pe_summary %>%
 private_counts <- private_sponsors %>%
   count(sponsor_name, sort = TRUE)
 
-#create a list for chatgpt
-result <- paste(
-  c(rbind(private_counts$sponsor_name, private_counts$n)),
-  collapse = ", "
-)
 
 write.csv(private_sponsors, file = "private_sponsors.csv")
