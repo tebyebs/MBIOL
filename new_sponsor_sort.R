@@ -9,9 +9,39 @@ library(gt)
 
 #Load the raw data
 ribits_data <- read.csv("raw_data/ribits_data_simplified.csv") 
+# testing dedup method ribits_data_test <- distinct(ribits_data, bank_id, .keep_all = T)
+#filtering the data & remove duplicates
+ribits_data_dedup <- ribits_data %>%
+  group_by(bank_id) %>%
+  group_modify(~ {
+    g <- .x
+    
+    # Count missing values in each row
+    g <- g %>%
+      mutate(.na_count = rowSums(is.na(across(everything())))) %>%
+      arrange(.na_count)
+    
+    # Start with the row that has the fewest NAs
+    out <- g[1, , drop = FALSE]
+    
+    # For each column, fill missing base values from other rows in the group
+    for (nm in names(out)) {
+      if (nm == ".na_count") next
+      
+      vals <- g[[nm]]
+      first_non_na <- vals[which(!is.na(vals))[1]]
+      
+      if (!is.na(first_non_na)) {
+        out[[nm]] <- first_non_na
+      }
+    }
+    
+    # Drop helper column
+    out$.na_count <- NULL
+    out
+  }) %>%
+  ungroup()
 
-#filtering the data
-ribits_data <- distinct(ribits_data, bank_id, .keep_all = T) #remove duplicates
 
 # read the raw data to attach columns
 ribits_data_raw <- read.csv("raw_data/ribits_data_raw.csv", stringsAsFactors = FALSE)
@@ -31,10 +61,12 @@ ribits_data <- ribits_data %>%
 ###FILTERING ALL BANKS
 sum(is.na(ribits_data$sponsor_name) & is.na(ribits_data$email_poc)) #887 instances of both no sponsor or poc 
 
+sum(is.na(ribits_data$year_established)) #ISSUE - 1677 YEAR ESTABLISHED NAs
+
+
 ribits_data_total <- ribits_data %>%
   filter(
-    !(is.na(sponsor_name) & is.na(email_poc)),
-    year_established > 1995
+    !(is.na(sponsor_name) & is.na(email_poc))
   ) %>%
   mutate(  #additional columns for analysis
     pe_owner = "no",
@@ -54,9 +86,6 @@ ribits_data_total <- ribits_data %>%
 
 
 
-
-write.csv()
-
 #filter only approved banks 
 ribits_data <- ribits_data %>%
   filter(bank_status %in% c("Approved", "Sold-Out"), #only approved banks and sold out
@@ -67,7 +96,7 @@ ribits_data <- ribits_data %>%
 ### DATA READY FOR SORTING 
 ### STEP 2 - ORGANISING SPONSORS BY NUMBERS OF BANKS
 
-# table(ribits_data_filt$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
+# table(ribits_data$bank_type) # Checks the kinds of banks - could be useful to create a table of the diff categories at this point, perhaps with more of the banks that have yet to be filtered
 
 ribits_data_private <- ribits_data %>%
   filter(bank_type %in% c("Private Commercial", "Combination Public/Private"))
