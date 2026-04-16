@@ -9,9 +9,9 @@ library(gt)
 
 #Load the raw data
 ribits_data <- read.csv("raw_data/ribits_data_simplified.csv") 
-# testing dedup method ribits_data_test <- distinct(ribits_data, bank_id, .keep_all = T)
+
 #filtering the data & remove duplicates
-ribits_data_dedup <- ribits_data %>%
+ribits_data <- ribits_data %>%
   group_by(bank_id) %>%
   group_modify(~ {
     g <- .x
@@ -59,8 +59,7 @@ ribits_data <- ribits_data %>%
 
 ###OPTIONAL
 ###FILTERING ALL BANKS
-sum(is.na(ribits_data$sponsor_name) & is.na(ribits_data$email_poc)) #887 instances of both no sponsor or poc 
-
+sum(is.na(ribits_data$sponsor_name) & is.na(ribits_data$email_poc)) #885 instances of both no sponsor or poc 
 sum(is.na(ribits_data$year_established)) #ISSUE - 1677 YEAR ESTABLISHED NAs
 
 
@@ -81,6 +80,8 @@ ribits_data_total <- ribits_data %>%
       TRUE ~ "single"
     )
   )
+
+
 #export file for analysis
 #write.csv(ribits_data_total, file = "all_sponsors.csv")
 
