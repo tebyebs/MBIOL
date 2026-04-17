@@ -80,7 +80,7 @@ ribits_data_total <- ribits_data %>%
       TRUE ~ "single"
     )
   )
-
+table(ribits_data_total$bank_type)
 
 #export file for analysis
 #write.csv(ribits_data_total, file = "all_sponsors.csv")
