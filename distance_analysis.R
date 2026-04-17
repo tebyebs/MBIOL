@@ -3,6 +3,7 @@ library(dplyr)                 # Data manipulation
 library(ggplot2)               # Data visualization
 library(here) 
 library(geosphere)
+library(tidyr)
 
 
 # load in ribits ledger
@@ -102,6 +103,59 @@ bank_sponsors <- all_sponsors %>%
 bank_dist <- avg_dist_by_bank %>%
   left_join(bank_sponsors, by = "bank_id")
 
+avg_dist_by_sponsor_type <- avg_dist_by_bank %>%
+  left_join(all_sponsors, by = "bank_id") %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    n_banks = n(),
+    avg_distance_m = mean(avg_distance_m, na.rm = TRUE),
+    avg_distance_km = avg_distance_m / 1000,
+    .groups = "drop"
+  )
 
+#looking at a state by state basis
 
+avg_dist_by_type_state <- avg_dist_by_bank %>%
+  left_join(all_sponsors, by = "bank_id") %>%
+  group_by(sponsor_type, state_list) %>%
+  summarise(
+    n_banks = n(),
+    avg_distance_m = mean(avg_distance_m, na.rm = TRUE),
+    avg_distance_km = avg_distance_m / 1000,
+    .groups = "drop"
+  ) %>%
+  arrange(sponsor_type, state_list)
+
+#plot a graph
+summary_by_type <- avg_dist_by_bank %>%
+  left_join(all_sponsors, by = "bank_id") %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    n = n(),
+    mean_km = mean(avg_distance_m, na.rm = TRUE) / 1000,
+    sd_km = sd(avg_distance_m, na.rm = TRUE) / 1000,
+    se_km = sd_km / sqrt(n),
+    ci_lower = mean_km - 1.96 * se_km,
+    ci_upper = mean_km + 1.96 * se_km,
+    .groups = "drop"
+  )
+
+summary_by_type <- summary_by_type %>%
+  arrange(mean_km) %>%
+  mutate(sponsor_type = factor(sponsor_type, levels = sponsor_type))
+
+ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+  theme_minimal()
+
+ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
+  labs(
+    title = "Average Distance by Sponsor Type",
+    x = "Sponsor Type",
+    y = "Average Distance (km)"
+  ) +
+  theme_minimal()
 
