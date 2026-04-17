@@ -6,7 +6,6 @@ library(lme4)                  # Statistcal Testing
 library(emmeans)
 
 # load in ribits ledger
-
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
 
 ledger_counts <- ledger %>% #checking which credit classifications to compare for the functional density analysis
