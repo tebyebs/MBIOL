@@ -80,7 +80,7 @@ ribits_data_total <- ribits_data %>%
       TRUE ~ "single"
     )
   )
-table(ribits_data_total$bank_type)
+
 
 #export file for analysis
 #write.csv(ribits_data_total, file = "all_sponsors.csv")
@@ -110,28 +110,13 @@ private_counts <- ribits_data_private %>%
 
 ### DATA SORTED MANUALLY IN EXCEL
 ### STEP 3 - CREATE PRIVATE BANKS FILE AND BEGIN FUNCTIONAL DENSITY ANALYSIS
-pe_sponsors <- read.csv("raw_data/pe_sponsors.csv")
-public_sponsors <- read.csv("raw_data/public_sponsors.csv")
+pe_sponsors <- read.csv("full_sorted_data/pe_sponsors.csv")
+public_sponsors <- read.csv("full_sorted_data/public_sponsors.csv")
+govt_listing <- read.csv("full_sorted_data/govt_sponsors.csv")
+private_sponsors <- read.csv("full_sorted_data/private_sponsors.csv")
+nonprofit_sponsors <- read.csv("full_sorted_data/nonprofit_sponsors.csv")
 
 #preparing private,pe, public database
-private_sponsors <- ribits_data_private %>%
-  mutate(
-    pe_owner = "no",
-    listing  = "no",
-    private = "yes"
-  )
-
-pe_sponsors <- pe_sponsors %>%
-  mutate(
-    listing  = "no",
-    private = "no"
-  )
-
-public_sponsors <- public_sponsors %>%
-  mutate(
-    pe_owner = "no",
-    private = "no"
-  )
 
 private_sponsors <- private_sponsors %>%
   mutate(zip_sponsor = as.character(zip_sponsor)) %>%
