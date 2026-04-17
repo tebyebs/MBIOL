@@ -5,6 +5,7 @@ library(purrr)                 # Functional programming
 library(ggplot2)               # Data visualization
 library(here)                  # File path handling
 library(tidyr) 
+library(scales)
 
 #load in the data
 pe_sponsors <- read.csv("full_sorted_data/pe_sponsors.csv")
@@ -51,3 +52,48 @@ table(all_sponsors$sponsor_type)
 #Assume single are all govt
 all_sponsors <- all_sponsors %>%
   mutate(sponsor_type = ifelse(sponsor_type == "single", "govt", sponsor_type))
+
+#remove dups
+all_sponsors <- all_sponsors %>%
+  distinct(bank_id, .keep_all = TRUE)
+
+table(all_sponsors$bank_status)
+###Part 2 - Analysis over time and pending vs approved 
+combined_counts <- all_sponsors %>%
+  mutate(
+    status_group = case_when(
+      bank_status %in% c("Approved", "Sold-Out") ~ "Approved/Sold-Out",
+      bank_status == "Pending" ~ "Pending",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(status_group)) %>%
+  count(status_group, sponsor_type) %>%
+  group_by(status_group) %>%
+  mutate(
+    pct = n / sum(n),
+    pct_label = scales::percent(pct)
+  ) %>%
+  ungroup() %>%
+  arrange(status_group, desc(n))
+
+combined_counts <- all_sponsors %>%
+  mutate(
+    status_group = case_when(
+      bank_status %in% c("Approved", "Sold-Out") ~ "Approved/Sold-Out",
+      bank_status == "Pending" ~ "Pending",
+      bank_status == "Withdrawn" ~ "Withdrawn",
+      bank_status == "Terminated" ~ "Terminated",
+      bank_status == "Suspended" ~ "Suspended",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(status_group)) %>%
+  count(status_group, sponsor_type) %>%
+  group_by(status_group) %>%
+  mutate(
+    pct = n / sum(n),
+    pct_label = percent(pct)
+  ) %>%
+  ungroup() %>%
+  arrange(status_group, desc(n))
