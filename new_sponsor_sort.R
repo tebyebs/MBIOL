@@ -111,10 +111,11 @@ private_counts <- ribits_data_private %>%
 ### DATA SORTED MANUALLY IN EXCEL
 ### STEP 3 - CREATE PRIVATE BANKS FILE AND BEGIN FUNCTIONAL DENSITY ANALYSIS
 pe_sponsors <- read.csv("full_sorted_data/pe_sponsors.csv")
-public_sponsors <- read.csv("full_sorted_data/public_sponsors.csv")
-govt_listing <- read.csv("full_sorted_data/govt_sponsors.csv")
+listed_sponsors <- read.csv("full_sorted_data/listed_sponsors.csv")
+govt_sponsors <- read.csv("full_sorted_data/govt_sponsors.csv")
 private_sponsors <- read.csv("full_sorted_data/private_sponsors.csv")
 nonprofit_sponsors <- read.csv("full_sorted_data/nonprofit_sponsors.csv")
+
 
 #preparing private,pe, public database
 
@@ -128,25 +129,31 @@ pe_sponsors <- pe_sponsors %>%
   mutate(zip_poc = as.character(zip_poc))
 
 
-public_sponsors <- public_sponsors %>%
+govt_sponsors <- govt_sponsors %>%
   mutate(zip_sponsor = as.character(zip_sponsor)) %>%
   mutate(zip_poc = as.character(zip_poc))
 
+nonprofit_sponsors <- nonprofit_sponsors %>%
+  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
+  mutate(zip_poc = as.character(zip_poc))
 
-#removes bank ids from private that were in pe or pub
-
-private_sponsors <- private_sponsors %>%
-  filter(
-    !bank_id %in% c(pe_sponsors$bank_id, public_sponsors$bank_id)
-  )
+listed_sponsors <- listed_sponsors %>%
+  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
+  mutate(zip_poc = as.character(zip_poc))
 
 
 #combines sponsors
 all_sponsors <- bind_rows(
   private_sponsors,
   pe_sponsors,
-  public_sponsors
+  govt_sponsors,
+  listed_sponsors,
+  nonprofit_sponsors
 )
+table(all_sponsors$sponsor_type)
+#Assume single are all govt
+all_sponsors <- all_sponsors %>%
+  mutate(sponsor_type = ifelse(sponsor_type == "single", "govt", sponsor_type))
 
 #create a table showing the differing sponsor names associated with each PE owner
 pe_summary <- pe_sponsors %>%
@@ -165,27 +172,18 @@ pe_summary %>%
     pe_owner = "Private Equity Owner",
     sponsor_names = "Affiliated Sponsor Name Entries"
   ) %>%
-  # Replace abbreviations in pe_owner column
-  text_transform(
-    locations = cells_body(columns = pe_owner),
-    fn = function(x) {
-      dplyr::recode(
-        x,
-        "ARC" = "Arc Ventures",
-        "DCG" = "Domain Capital Group",
-        "EIP" = "Ecosystem Investment Partners",
-        "RES" = "Resource Environmental Solutions"
-      )
-    }
-  ) %>%
   tab_header(
     title = "Sponsor Names by Private Equity Owner"
   ) #%>%
   #gtsave("pe_summary_table.html") save if needed
 
-#how many unique private entities? roughly since they need more merging
-private_counts <- private_sponsors %>%
-  count(sponsor_name, sort = TRUE)
+#CHECK FOR DUPLICATES
+sum(is.na(all_sponsors$sponsor_type))
 
+all_sponsors <- all_sponsors %>%
+  distinct(bank_id, .keep_all = TRUE)
+
+priv_count <- all_sponsors %>% #checking which credit classifications to compare for the functional density analysis
+  count(private, sort = T)
 
 
