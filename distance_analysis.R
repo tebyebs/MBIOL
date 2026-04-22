@@ -5,19 +5,25 @@ library(here)
 library(geosphere)
 library(tidyr)
 
-
 # load in ribits ledger
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
+
+#fill out missing bank ids using bank name
+#remove banks with no name, since they have very little information
+sum(is.na(ledger$name) & is.na(ledger$bank_id))
+#attempted to do this, no matches between bank names in ledger and all_sponsors for those with na bank ids
 
 #load in csv
 all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
 
-#filter for data with no coords
+#filter for data with no coords, as well as banks with no id 
 ledger <- ledger %>%
   filter(
     !is.na(impact_location_latitude), 
     !is.na(impact_location_longitude),
+    !is.na(bank_id)
   )
+sum(is.na(ledger$bank_id))
 
 #calc distance
 
@@ -62,7 +68,8 @@ ledger2 <- ledger %>%
   mutate(
     impact_location_longitude = fix_coord(impact_location_longitude, "lon"),
     impact_location_latitude  = fix_coord(impact_location_latitude, "lat")
-  )
+  ) %>%
+  mutate(impact_location_longitude = -abs(impact_location_longitude)) #MANY SEEM TO BE MISSING NEGATIVE SIGn
 
 sponsors2 <- all_sponsors %>%
   mutate(
@@ -73,6 +80,46 @@ sponsors2 <- all_sponsors %>%
 #check it worked
 summary(ledger2$impact_location_longitude)
 summary(ledger2$impact_location_latitude)
+summary(sponsors2$longitude)
+summary(sponsors2$latitude)
+
+
+###CHECK IF THESE CO_ORDS FALL WITHIN THE US,PR,ALASKA OR HAWAII
+library(sf)
+library(tigris)
+
+options(tigris_use_cache = TRUE)
+
+# U.S. states + DC + Puerto Rico
+us_region <- tigris::states(cb = TRUE, class = "sf") %>%
+  filter(STUSPS %in% c(state.abb, "DC", "PR")) %>%
+  st_transform(4326) %>%
+  st_union()
+
+# Turn your ledger into spatial points
+ledger_sf <- ledger2 %>%
+  mutate(row_id = row_number()) %>%
+  st_as_sf(
+    coords = c("impact_location_longitude", "impact_location_latitude"),
+    crs = 4326,
+    remove = FALSE,
+    na.fail = FALSE
+  )
+
+# Flag points that fall inside the U.S. region
+ledger_sf <- ledger_sf %>%
+  mutate(within_us = lengths(st_within(geometry, us_region)) > 0)
+
+# Rows outside the region, plus rows with missing coords
+outside_rows <- ledger_sf %>%
+  filter(!within_us | is.na(impact_location_longitude) | is.na(impact_location_latitude)) %>%
+  st_drop_geometry()
+
+ledger2$within_us <- ledger_sf$within_us
+
+#FILTER ONLY BANKS THAT ARE WITHIN THE USA
+ledger2 <- ledger2 %>%
+  filter(within_us)
 
 #compute again
 avg_dist_by_bank <- ledger2 %>%
