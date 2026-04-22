@@ -9,6 +9,9 @@ library(tidyr)
 # load in ribits ledger
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
 
+#load in csv
+all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
+
 #filter for data with no coords
 ledger <- ledger %>%
   filter(

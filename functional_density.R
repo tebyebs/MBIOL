@@ -45,7 +45,8 @@ functional_density <- ledger %>%
 
 
 ###PART 2 STATISTICAL ANALYSIS
-
+#read sponsor categories
+all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
 
 # collapse data to be at bank level
 functional_density <- ledger %>%

@@ -177,13 +177,19 @@ pe_summary %>%
   ) #%>%
   #gtsave("pe_summary_table.html") save if needed
 
-#CHECK FOR DUPLICATES
+#CHECK FOR DUPLICATES & NA 
 sum(is.na(all_sponsors$sponsor_type))
+all_sponsors %>%
+  count(bank_id) %>%
+  filter(n > 1)
 
 all_sponsors <- all_sponsors %>%
   distinct(bank_id, .keep_all = TRUE)
 
 priv_count <- all_sponsors %>% #checking which credit classifications to compare for the functional density analysis
   count(private, sort = T)
+
+#write the cleaned and sorted version to disk
+#write.csv(all_sponsors, file = "full_sorted_data/all_sponsors.csv")
 
 
