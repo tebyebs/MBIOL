@@ -153,28 +153,6 @@ bank_sponsors <- all_sponsors %>%
 bank_dist <- avg_dist_by_bank %>%
   left_join(bank_sponsors, by = "bank_id")
 
-avg_dist_by_sponsor_type <- avg_dist_by_bank %>%
-  left_join(all_sponsors, by = "bank_id") %>%
-  group_by(sponsor_type) %>%
-  summarise(
-    n_banks = n(),
-    avg_distance_m = mean(avg_distance_m, na.rm = TRUE),
-    avg_distance_km = avg_distance_m / 1000,
-    .groups = "drop"
-  )
-
-#looking at a state by state basis
-
-avg_dist_by_type_state <- avg_dist_by_bank %>%
-  left_join(all_sponsors, by = "bank_id") %>%
-  group_by(sponsor_type, state_list) %>%
-  summarise(
-    n_banks = n(),
-    avg_distance_m = mean(avg_distance_m, na.rm = TRUE),
-    avg_distance_km = avg_distance_m / 1000,
-    .groups = "drop"
-  ) %>%
-  arrange(sponsor_type, state_list)
 
 #plot a graph
 summary_by_type <- avg_dist_by_bank %>%
