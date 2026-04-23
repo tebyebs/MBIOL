@@ -8,57 +8,12 @@ library(tidyr)
 library(scales)
 
 #load in the data
-pe_sponsors <- read.csv("full_sorted_data/pe_sponsors.csv")
-listed_sponsors <- read.csv("full_sorted_data/listed_sponsors.csv")
-govt_sponsors <- read.csv("full_sorted_data/govt_sponsors.csv")
-private_sponsors <- read.csv("full_sorted_data/private_sponsors.csv")
-nonprofit_sponsors <- read.csv("full_sorted_data/nonprofit_sponsors.csv")
+all_sponsors <- read.csv("full_sorted_data/all_sponsors")
 
+###Part 2 - Analysis over time and pending vs approved - based on gains and losses linear model
 
-#preparing private,pe, public database
-
-private_sponsors <- private_sponsors %>%
-  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
-  mutate(zip_poc = as.character(zip_poc))
-
-
-pe_sponsors <- pe_sponsors %>%
-  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
-  mutate(zip_poc = as.character(zip_poc))
-
-
-govt_sponsors <- govt_sponsors %>%
-  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
-  mutate(zip_poc = as.character(zip_poc))
-
-nonprofit_sponsors <- nonprofit_sponsors %>%
-  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
-  mutate(zip_poc = as.character(zip_poc))
-
-listed_sponsors <- listed_sponsors %>%
-  mutate(zip_sponsor = as.character(zip_sponsor)) %>%
-  mutate(zip_poc = as.character(zip_poc))
-
-
-#combines sponsors
-all_sponsors <- bind_rows(
-  private_sponsors,
-  pe_sponsors,
-  govt_sponsors,
-  listed_sponsors,
-  nonprofit_sponsors
-)
-table(all_sponsors$sponsor_type)
-#Assume single are all govt
-all_sponsors <- all_sponsors %>%
-  mutate(sponsor_type = ifelse(sponsor_type == "single", "govt", sponsor_type))
-
-#remove dups
-all_sponsors <- all_sponsors %>%
-  distinct(bank_id, .keep_all = TRUE)
-
-table(all_sponsors$bank_status)
-###Part 2 - Analysis over time and pending vs approved 
+#filter for banks with no year established,maybe use bank status date instead
+#ALTERNATIVELY, can ignore year established and just do approved vs pending 
 combined_counts <- all_sponsors %>%
   mutate(
     status_group = case_when(
