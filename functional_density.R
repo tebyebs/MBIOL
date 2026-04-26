@@ -2,8 +2,11 @@
 library(dplyr)                 # Data manipulation
 library(ggplot2)               # Data visualization
 library(here) 
-library(lme4)                  # Statistcal Testing
-library(emmeans)
+library(patchwork)
+library(gt)
+library(broom)
+library(gt)
+
 
 # load in ribits ledger
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
@@ -47,7 +50,7 @@ all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
   filter(bank_status %in% c("Approved", "Sold-Out"))
 
 
-# collapse data to be at bank level
+# collapse data to be at bank level for PEM and PFO
 functional_density_pfo <- ledger_pfo %>%
   group_by(bank_id) %>%
   summarise(
@@ -56,7 +59,8 @@ functional_density_pfo <- ledger_pfo %>%
   ) %>%
   inner_join(all_sponsors, by = "bank_id") %>%
   mutate(
-    log_avg_credit_acres = log(avg_credit_acres))
+    log_avg_credit_acres = log(avg_credit_acres),
+    sqrt_acres = sqrt(avg_credit_acres))
 
 functional_density_pem <- ledger_pem %>%
   group_by(bank_id) %>%
@@ -66,16 +70,11 @@ functional_density_pem <- ledger_pem %>%
   ) %>%
   inner_join(all_sponsors, by = "bank_id") %>%
   mutate(
-    log_avg_credit_acres = log(avg_credit_acres)) 
+    log_avg_credit_acres = log(avg_credit_acres),
+    sqrt_acres = sqrt(avg_credit_acres)) 
 
 
-###testing for anova suitabilit
-fd_test <- functional_density_pfo %>%
-  filter(!is.na(avg_credit_acres), !is.na(sponsor_type))
 
-
-qqnorm(fd_test$log_avg_credit_acres)
-qqline(fd_test$log_avg_credit_acres)
 
 #simple avg analysis
 summary_table_pfo <- functional_density_pfo %>%
@@ -90,6 +89,49 @@ summary_table_pfo <- functional_density_pfo %>%
     .groups = "drop"
   )
 
+summary_table_pem <- functional_density_pem %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    mean = mean(avg_credit_acres, na.rm = TRUE),
+    sd = sd(avg_credit_acres, na.rm = TRUE),
+    n = n(),
+    se = sd / sqrt(n),
+    lower = mean - 1.96 * se,
+    upper = mean + 1.96 * se,
+    .groups = "drop"
+  )
+
+p1s <- ggplot(summary_table_pfo, aes(x = sponsor_type, y = mean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.15) +
+  theme_minimal(base_size = 12) +
+  labs(
+    x = "PFO Sponsor Type",
+    y = "Average Credit Acres",
+    title = "Average Credit Acres by Sponsor Type for PFO",
+    subtitle = "Points show means; bars show 95% confidence intervals"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+  )
+
+
+p2s <- ggplot(summary_table_pem, aes(x = sponsor_type, y = mean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.15) +
+  theme_minimal(base_size = 12) +
+  labs(
+    x = "PEM Sponsor Type",
+    y = "Average Credit Acres",
+    title = "Average Credit Acres by Sponsor Type for PEM",
+    subtitle = "Points show means; bars show 95% confidence intervals"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+  )
+
+
+
 #log avg analysis
 log_summary_table_pfo <- functional_density_pfo %>%
   group_by(sponsor_type) %>%
@@ -103,23 +145,249 @@ log_summary_table_pfo <- functional_density_pfo %>%
     .groups = "drop"
   )
 
-#simple means graph, no log transform
-p <- ggplot(log_summary_table_pfo, aes(x = sponsor_type, y = mean)) +
+log_summary_table_pem <- functional_density_pem %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    mean = mean(log_avg_credit_acres, na.rm = TRUE),
+    sd = sd(log_avg_credit_acres, na.rm = TRUE),
+    n = n(),
+    se = sd / sqrt(n),
+    lower = mean - 1.96 * se,
+    upper = mean + 1.96 * se,
+    .groups = "drop"
+  )
+
+#log transform graph
+p1 <- ggplot(log_summary_table_pfo, aes(x = sponsor_type, y = mean)) +
   geom_point(size = 3) +
   geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.15) +
   theme_minimal(base_size = 12) +
   labs(
-    x = "Sponsor Type",
+    x = "PFO Sponsor Type",
     y = "Average Log Credit Acres",
-    title = "Average Log Credit Acres by Sponsor Type",
+    title = "Average Log Credit Acres by Sponsor Type for PFO",
     subtitle = "Points show means; bars show 95% confidence intervals"
   ) +
   theme(
     panel.grid.minor = element_blank(),
-    axis.text.x = element_text(angle = 30, hjust = 1)
   )
 
-p
+
+p2 <- ggplot(log_summary_table_pem, aes(x = sponsor_type, y = mean)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.15) +
+  theme_minimal(base_size = 12) +
+  labs(
+    x = "PEM Sponsor Type",
+    y = "Average Log Credit Acres",
+    title = "Average Log Credit Acres by Sponsor Type for PEM",
+    subtitle = "Points show means; bars show 95% confidence intervals"
+  ) +
+  theme(
+    panel.grid.minor = element_blank(),
+  )
+
+### Plotting
+#simple graphs
+p1s <- p1s + ylim(0, 1)
+p2s <- p2s + ylim(0, 1)
+
+p2s <- p2s + theme(axis.title.y = element_blank(),
+                   axis.text.y  = element_blank(),
+                   axis.ticks.y = element_blank())
+
+p1s + p2s + plot_layout(widths = c(1,1))
+
+#transformed
+p1 <- p1 + ylim(-4, 1)
+p2 <- p2 + ylim(-4, 1)
+
+p2 <- p2 + theme(axis.title.y = element_blank(),
+                   axis.text.y  = element_blank(),
+                   axis.ticks.y = element_blank())
+
+p1 + p2 + plot_layout(widths = c(1,1))
 
 
 
+###ANOVA TEST
+# PFO model
+pfo_model <- aov(log_avg_credit_acres ~ sponsor_type, data = functional_density_pfo)
+
+# PEM model
+pem_model <- aov(log_avg_credit_acres ~ sponsor_type, data = functional_density_pem)
+
+
+###Tukey Post Hoc
+pfo_tukey <- TukeyHSD(pfo_model)$sponsor_type
+pem_tukey <- TukeyHSD(pem_model)$sponsor_type
+
+#Plot result
+
+# --- Prepare data ---
+pfo_anova <- tidy(pfo_model) %>%
+  mutate(
+    term = case_when(
+      term == "sponsor_type" ~ "Sponsor Type",
+      term == "Residuals" ~ "Residuals",
+      TRUE ~ term
+    ),
+    Dataset = "PFO"
+  )
+
+pem_anova <- tidy(pem_model) %>%
+  mutate(
+    term = case_when(
+      term == "sponsor_type" ~ "Sponsor Type",
+      term == "Residuals" ~ "Residuals",
+      TRUE ~ term
+    ),
+    Dataset = "PEM"
+  )
+
+combined_anova <- bind_rows(pfo_anova, pem_anova)
+
+# --- Add significance stars ---
+combined_anova <- combined_anova %>%
+  mutate(
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+# --- Build journal-style table ---
+anova_table <- combined_anova %>%
+  gt(groupname_col = "Dataset") %>%
+  
+  # Format numbers
+  fmt_number(columns = c(sumsq, meansq, statistic), decimals = 3) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  
+  # Merge p-value + stars
+  cols_merge(
+    columns = c(p.value, sig),
+    pattern = "{1} {2}"
+  ) %>%
+  
+  # Clean labels
+  cols_label(
+    term = "Source",
+    df = "Df",
+    sumsq = "Sum Sq",
+    meansq = "Mean Sq",
+    statistic = "F",
+    p.value = "p-value"
+  ) %>%
+  
+  # Table title + subtitle
+  tab_header(
+    title = "Effect of Sponsor Type on Functional Density",
+    subtitle = "One-way ANOVA results for PFO and PEM datasets"
+  ) %>%
+  
+  # Footnote
+  tab_source_note(
+    source_note = md("*Note:* p-values in scientific notation. Significance levels: *p* < 0.05 (*), < 0.01 (**), < 0.001 (***).")
+  ) %>%
+  
+  # Style (journal-like)
+  tab_options(
+    table.font.size = 12,
+    data_row.padding = px(4),
+    heading.title.font.size = 14,
+    heading.subtitle.font.size = 12
+  ) %>%
+  
+  cols_align(
+    align = "center",
+    -term
+  )
+
+##gtsave(anova_table, "anova_table_journal.docx")
+
+###tukey formatting
+
+# PFO Tukey
+pfo_tukey <- as.data.frame(TukeyHSD(pfo_model)$sponsor_type) %>%
+  mutate(
+    comparison = rownames(.),
+    Dataset = "PFO"
+  )
+
+# PEM Tukey
+pem_tukey <- as.data.frame(TukeyHSD(pem_model)$sponsor_type) %>%
+  mutate(
+    comparison = rownames(.),
+    Dataset = "PEM"
+  )
+
+# Combine
+tukey_combined <- bind_rows(pfo_tukey, pem_tukey)
+
+tukey_combined <- tukey_combined %>%
+  rename(
+    Difference = diff,
+    Lower_CI = lwr,
+    Upper_CI = upr,
+    p.value = `p adj`
+  ) %>%
+  mutate(
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+
+tukey_table <- tukey_combined %>%
+  gt(groupname_col = "Dataset") %>%
+  
+  # Format numbers
+  fmt_number(columns = c(Difference, Lower_CI, Upper_CI), decimals = 3) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  
+  # Merge p-value + stars
+  cols_merge(
+    columns = c(p.value, sig),
+    pattern = "{1} {2}"
+  ) %>%
+  
+  # Labels
+  cols_label(
+    comparison = "Comparison",
+    Difference = "Mean Diff",
+    Lower_CI = "Lower CI",
+    Upper_CI = "Upper CI",
+    p.value = "p-value"
+  ) %>%
+  
+  # Title + subtitle (match ANOVA style)
+  tab_header(
+    title = "Pairwise Comparisons of Sponsor Type",
+    subtitle = "Tukey HSD post hoc test (PFO and PEM datasets)"
+  ) %>%
+  
+  # Footnote
+  tab_source_note(
+    source_note = md("*Note:* Values are differences in log-transformed means. Confidence intervals are 95%. Significance: *p* < 0.05 (*), < 0.01 (**), < 0.001 (***).")
+  ) %>%
+  
+  # Style (match ANOVA)
+  tab_options(
+    table.font.size = 12,
+    data_row.padding = px(4),
+    heading.title.font.size = 14,
+    heading.subtitle.font.size = 12
+  ) %>%
+  
+  cols_align(
+    align = "center",
+    -comparison
+  )
+
+gtsave(tukey_table, "tukey_table_journal.docx")
