@@ -17,6 +17,9 @@ sum(is.na(ledger$name) & is.na(ledger$bank_id))
 all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
 #FILTER FOR ONLY APPROVED OR SOLD OUT BANKS 
   filter(bank_status %in% c("Approved", "Sold-Out"))
+###ADD RAWRIBITS DATA ABOUT HUC CODE
+
+
 
 #filter for data with no coords, as well as banks with no id 
 ledger <- ledger %>%
@@ -26,6 +29,10 @@ ledger <- ledger %>%
     !is.na(bank_id)
   )
 sum(is.na(ledger$bank_id))
+
+###Filter for HUC info in the ledger
+
+
 
 #calc distance
 

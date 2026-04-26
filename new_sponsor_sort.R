@@ -189,6 +189,18 @@ all_sponsors <- all_sponsors %>%
 priv_count <- all_sponsors %>% #checking which credit classifications to compare for the functional density analysis
   count(private, sort = T)
 
+all_sponsors <- all_sponsors %>%
+  select(-X) %>%  # remove the first column
+  mutate(
+    sponsor_type = recode(sponsor_type,
+                          "govt" = "Government",
+                          "private" = "Private",
+                          "pe" = "PE",
+                          "nonprofit" = "Nonprofit",
+                          "listed" = "Listed"
+    )
+  )
+
 #write the cleaned and sorted version to disk
 #write.csv(all_sponsors, file = "full_sorted_data/all_sponsors.csv")
 
