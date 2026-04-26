@@ -15,7 +15,7 @@ ledger_counts <- ledger %>% #checking which credit classifications to compare fo
 
 ledger <- ledger %>%
   filter(
-    credit_classification_or_subdivision %in% c("Bottomland Hardwood", "Bottomland Hardwoods"),  #can replace to include any kind of credit
+    #credit_classification_or_subdivision %in% c("Bottomland Hardwood", "Bottomland Hardwoods"),  #can replace to include any kind of credit
     !is.na(credits), 
     !is.na(acres),
     acres !=0,
@@ -46,7 +46,9 @@ functional_density <- ledger %>%
 
 ###PART 2 STATISTICAL ANALYSIS
 #read sponsor categories
-all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
+all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
+#FILTER FOR ONLY APPROVED OR SOLD OUT BANKS 
+  filter(bank_status %in% c("Approved", "Sold-Out"))
 
 # collapse data to be at bank level
 functional_density <- ledger %>%

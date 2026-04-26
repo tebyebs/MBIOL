@@ -14,7 +14,9 @@ sum(is.na(ledger$name) & is.na(ledger$bank_id))
 #attempted to do this, no matches between bank names in ledger and all_sponsors for those with na bank ids
 
 #load in csv
-all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
+all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
+#FILTER FOR ONLY APPROVED OR SOLD OUT BANKS 
+  filter(bank_status %in% c("Approved", "Sold-Out"))
 
 #filter for data with no coords, as well as banks with no id 
 ledger <- ledger %>%
@@ -186,4 +188,6 @@ ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
     y = "Average Distance (km)"
   ) +
   theme_minimal()
+
+### STAGE 3 HUC ECOLOGICAL ANALYSIS
 
