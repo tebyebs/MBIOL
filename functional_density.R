@@ -110,8 +110,8 @@ p <- ggplot(log_summary_table_pfo, aes(x = sponsor_type, y = mean)) +
   theme_minimal(base_size = 12) +
   labs(
     x = "Sponsor Type",
-    y = "Average Credit Acres",
-    title = "Average Credit Acres by Sponsor Type",
+    y = "Average Log Credit Acres",
+    title = "Average Log Credit Acres by Sponsor Type",
     subtitle = "Points show means; bars show 95% confidence intervals"
   ) +
   theme(

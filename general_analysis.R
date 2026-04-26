@@ -13,7 +13,6 @@ all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
 
 ###Part 2 - Analysis over time and pending vs approved - based on gains and losses linear model
 library(gt)
-library(scales)
 
 bank_type_table <- all_sponsors %>%
   count(bank_type, name = "Count") %>%
@@ -48,12 +47,27 @@ bank_type_table %>%
 
 flows <- all_sponsors %>%
   count(bank_type, sponsor_type) %>%
-  rename(source = bank_type, target = sponsor_type, value = n)#]
+  rename(source = bank_type, target = sponsor_type, value = n)
 
 
 # Create node list
 nodes <- data.frame(
   name = unique(c(flows$source, flows$target))
+)
+# Calculate totals per bank_type
+source_totals <- flows %>%
+  group_by(source) %>%
+  summarise(total = sum(value))
+
+# Calculate totals per sponsor_type
+target_totals <- flows %>%
+  group_by(target) %>%
+  summarise(total = sum(value))
+
+# Combine
+node_totals <- bind_rows(
+  source_totals %>% rename(name = source),
+  target_totals %>% rename(name = target)
 )
 
 nodes <- nodes %>%
@@ -71,7 +85,7 @@ p <- sankeyNetwork(
   Target = "target_id",
   Value = "value",
   NodeID = "label",   # ← MUST be "label", not "name"
-  fontSize = 12,
-  nodeWidth = 30
+  fontSize = 18,
+  nodeWidth = 40
 )
 p
