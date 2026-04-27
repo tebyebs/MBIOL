@@ -256,21 +256,19 @@ huc_distance <- function(bank_huc, impact_huc) {
 }
 
 library(purrr)
-#THIS DIDNT WORK _ CHECK WITH CHAT AGAIN - imapcts that are not same huc 8 got measured as zero for some reason
+#THIS DID WORK - creates min/max huc, as well as avg huc, and proportion in same basin
 bank_data <- bank_data %>%
   mutate(
     huc_distances = map2(
       huc_list_from_bank_location,
       impact_hucs,
-      ~ map_dbl(.y, ~ huc_distance(.x, .))
-    ),
-    
-    # summarise per bank
-    mean_huc_distance = map_dbl(huc_distances, mean, na.rm = TRUE),
-    max_huc_distance  = map_dbl(huc_distances, max, na.rm = TRUE),
-    min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE)
+      ~ {
+        bank_huc <- .x
+        map_dbl(.y, ~ huc_distance(bank_huc, .x))
+      }
+    ), prop_same_huc8 = map_dbl(huc_distances, ~ mean(.x == 0, na.rm = TRUE))    
   )
-#THIS DID WORK
+#Long version - each impact has its own row 
 bank_long <- bank_data %>%
   select(bank_id, huc_list_from_bank_location, impact_hucs) %>%
   unnest(impact_hucs) %>%
@@ -280,4 +278,26 @@ bank_long <- bank_data %>%
       huc_list_from_bank_location,
       impact_hucs
     )
+  )
+
+library(ggplot2)
+
+ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_boxplot(width = 0.15, outlier.shape = NA) +
+  stat_summary(fun = mean, geom = "point", size = 2) +
+  labs(
+    x = "Sponsor Type",
+    y = "Mean HUC Distance",
+    title = "Differences in Ecological Distance by Ownership Type"
+  ) +
+  theme_minimal()
+
+ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
+  geom_boxplot(width = 0.6) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 3) +
+  theme_classic() +
+  labs(
+    x = "Sponsor Type",
+    y = "Mean HUC Distance"
   )
