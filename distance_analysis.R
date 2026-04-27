@@ -4,6 +4,7 @@ library(ggplot2)               # Data visualization
 library(here) 
 library(geosphere)
 library(tidyr)
+library(stringr)
 
 # load in ribits ledger
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
@@ -13,25 +14,52 @@ ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
 sum(is.na(ledger$name) & is.na(ledger$bank_id))
 #attempted to do this, no matches between bank names in ledger and all_sponsors for those with na bank ids
 
+###ADD RAWRIBITS DATA ABOUT HUC CODE
+bank_huc <- read.csv("raw_data/ribits_data_raw.csv", stringsAsFactors = FALSE) %>%
+  #NEED TO TAKE THE FIRST HUC LOCATION ONLY, SINCE THERE ARE MULTIPLE
+  distinct(bank_id, .keep_all = TRUE) %>%
+  select(bank_id, huc_list_from_bank_location) %>%
+  mutate(
+    huc_list_from_bank_location = str_trim(
+      str_extract(huc_list_from_bank_location, "^[^,]+")
+    )) %>%
+  filter(!is.na(huc_list_from_bank_location))
+  
+sum(is.na(bank_huc$huc_list_from_bank_location))
+
 #load in csv
 all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
 #FILTER FOR ONLY APPROVED OR SOLD OUT BANKS 
-  filter(bank_status %in% c("Approved", "Sold-Out"))
-###ADD RAWRIBITS DATA ABOUT HUC CODE
+  filter(bank_status %in% c("Approved", "Sold-Out")) %>%
+  left_join(
+    bank_huc,
+    by = "bank_id"
+  )
 
+#ensure hucs are even length
+all_sponsors <- all_sponsors %>%
+  mutate(
+    huc_list_from_bank_location = str_trim(huc_list_from_bank_location),
+    huc_list_from_bank_location = ifelse(
+      !is.na(huc_list_from_bank_location) &
+        nchar(huc_list_from_bank_location) %% 2 == 1,
+      paste0("0", huc_list_from_bank_location),
+      huc_list_from_bank_location
+    )
+  )
 
+table(nchar(all_sponsors$huc_list_from_bank_location))
 
-#filter for data with no coords, as well as banks with no id 
+#filter for data with no coords, as well as banks with no id, and HUC info -  
 ledger <- ledger %>%
   filter(
     !is.na(impact_location_latitude), 
     !is.na(impact_location_longitude),
-    !is.na(bank_id)
+    !is.na(bank_id),
+    !is.na(impact_huc)
   )
 sum(is.na(ledger$bank_id))
-
-###Filter for HUC info in the ledger
-
+sum(is.na(ledger$impact_huc))
 
 
 #calc distance
