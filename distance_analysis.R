@@ -219,4 +219,65 @@ ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
   theme_minimal()
 
 ### STAGE 3 HUC ECOLOGICAL ANALYSIS
+ledger2_clean <- ledger2 %>%
+  mutate(
+    impact_huc = str_trim(impact_huc),
+    impact_huc = ifelse(
+      !is.na(impact_huc) & nchar(impact_huc) %% 2 == 1,
+      paste0("0", impact_huc),
+      impact_huc
+    )
+  ) %>%
+  filter(!is.na(impact_huc), impact_huc != "")
 
+#check the banks 
+table(nchar(ledger2$impact_huc))
+table(nchar(ledger2_clean$impact_huc))
+
+bank_impacts <- ledger2_clean %>%
+  group_by(bank_id) %>%
+  summarise(
+    impact_hucs = list(impact_huc),
+    .groups = "drop"
+  )
+
+bank_data <- bank_impacts %>%
+  inner_join(all_sponsors, by = "bank_id")
+
+#huc distance function
+huc_distance <- function(bank_huc, impact_huc) {
+  if (is.na(bank_huc) | is.na(impact_huc)) return(NA)
+  
+  if (substr(bank_huc, 1, 8) == substr(impact_huc, 1, 8)) return(0)
+  else if (substr(bank_huc, 1, 6) == substr(impact_huc, 1, 6)) return(1)
+  else if (substr(bank_huc, 1, 4) == substr(impact_huc, 1, 4)) return(2)
+  else if (substr(bank_huc, 1, 2) == substr(impact_huc, 1, 2)) return(3)
+  else return(4)
+}
+
+library(purrr)
+#THIS DIDNT WORK _ CHECK WITH CHAT AGAIN - imapcts that are not same huc 8 got measured as zero for some reason
+bank_data <- bank_data %>%
+  mutate(
+    huc_distances = map2(
+      huc_list_from_bank_location,
+      impact_hucs,
+      ~ map_dbl(.y, ~ huc_distance(.x, .))
+    ),
+    
+    # summarise per bank
+    mean_huc_distance = map_dbl(huc_distances, mean, na.rm = TRUE),
+    max_huc_distance  = map_dbl(huc_distances, max, na.rm = TRUE),
+    min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE)
+  )
+#THIS DID WORK
+bank_long <- bank_data %>%
+  select(bank_id, huc_list_from_bank_location, impact_hucs) %>%
+  unnest(impact_hucs) %>%
+  mutate(
+    huc_distance = mapply(
+      huc_distance,
+      huc_list_from_bank_location,
+      impact_hucs
+    )
+  )
