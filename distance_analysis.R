@@ -50,7 +50,7 @@ all_sponsors <- all_sponsors %>%
 
 table(nchar(all_sponsors$huc_list_from_bank_location))
 
-#filter for data with no coords, as well as banks with no id, and HUC info -  
+#filter for data with no coords, as well as banks with no id, and HUC info - later, filter for co-ords within USA as well 
 ledger <- ledger %>%
   filter(
     !is.na(impact_location_latitude), 
@@ -183,12 +183,6 @@ avg_dist_by_bank <- ledger2 %>%
 
 #adding sponsor type information
 # keep only sponsor rows that appear in avg_dist_by_bank
-bank_sponsors <- all_sponsors %>%
-  semi_join(avg_dist_by_bank, by = "bank_id")
-
-# join sponsor columns onto the distance table
-bank_dist <- avg_dist_by_bank %>%
-  left_join(bank_sponsors, by = "bank_id")
 
 
 #plot a graph
