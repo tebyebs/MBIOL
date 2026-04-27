@@ -390,4 +390,4 @@ tukey_table <- tukey_combined %>%
     -comparison
   )
 
-gtsave(tukey_table, "tukey_table_journal.docx")
+#gtsave(tukey_table, "tukey_table_journal.docx")
