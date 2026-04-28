@@ -5,6 +5,7 @@ library(here)
 library(geosphere)
 library(tidyr)
 library(stringr)
+library(purrr)
 
 # load in ribits ledger
 ledger <- readRDS("ribits_data/harmonized_ribits_ledgers.rds")
@@ -25,16 +26,16 @@ bank_huc <- read.csv("raw_data/ribits_data_raw.csv", stringsAsFactors = FALSE) %
     )) %>%
   filter(!is.na(huc_list_from_bank_location))
   
-sum(is.na(bank_huc$huc_list_from_bank_location))
-
 #load in csv
 all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv") %>%
 #FILTER FOR ONLY APPROVED OR SOLD OUT BANKS 
   filter(bank_status %in% c("Approved", "Sold-Out")) %>%
-  left_join(
+  inner_join(
     bank_huc,
     by = "bank_id"
   )
+
+sum(is.na(all_sponsors$huc_list_from_bank_location))
 
 #ensure hucs are even length
 all_sponsors <- all_sponsors %>%
@@ -181,8 +182,7 @@ avg_dist_by_bank <- ledger2 %>%
   )
 
 
-#adding sponsor type information
-# keep only sponsor rows that appear in avg_dist_by_bank
+
 
 
 #plot a graph
@@ -203,10 +203,6 @@ summary_by_type <- summary_by_type %>%
   arrange(mean_km) %>%
   mutate(sponsor_type = factor(sponsor_type, levels = sponsor_type))
 
-ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
-  geom_point(size = 3) +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
-  theme_minimal()
 
 ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
   geom_col() +
@@ -217,6 +213,10 @@ ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
     y = "Average Distance (km)"
   ) +
   theme_minimal()
+
+
+
+
 
 ### STAGE 3 HUC ECOLOGICAL ANALYSIS
 ledger2_clean <- ledger2 %>%
@@ -255,7 +255,7 @@ huc_distance <- function(bank_huc, impact_huc) {
   else return(4)
 }
 
-library(purrr)
+
 #THIS DID WORK - creates min/max huc, as well as avg huc, and proportion in same basin
 bank_data <- bank_data %>%
   mutate(
@@ -266,54 +266,71 @@ bank_data <- bank_data %>%
         bank_huc <- .x
         map_dbl(.y, ~ huc_distance(bank_huc, .x))
       }
-    ), prop_same_huc8 = map_dbl(huc_distances, ~ mean(.x == 0, na.rm = TRUE))    
+    ),
+    mean_huc_distance = map_dbl(huc_distances, mean, na.rm = TRUE),
+    max_huc_distance  = map_dbl(huc_distances, max, na.rm = TRUE),
+    min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE)
   )
-#Long version - each impact has its own row 
-bank_long <- bank_data %>%
-  select(bank_id, huc_list_from_bank_location, impact_hucs) %>%
-  unnest(impact_hucs) %>%
-  mutate(
-    huc_distance = mapply(
-      huc_distance,
-      huc_list_from_bank_location,
-      impact_hucs
-    )
-  )
-
-library(ggplot2)
 
 ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
-  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_violin(trim = T, alpha = 0.6) +
   geom_boxplot(width = 0.15, outlier.shape = NA) +
   stat_summary(fun = mean, geom = "point", size = 2) +
   labs(
     x = "Sponsor Type",
-    y = "Mean HUC Distance",
-    title = "Differences in Ecological Distance by Ownership Type"
+    y = "Mean HUC Distance"
   ) +
   theme_minimal()
 
+###using a jitterplot since violin plot didnt really make sense here - the probability distribution extended beyond the axis limits 
 
-summary_huc <- bank_data %>%
-  group_by(sponsor_type) %>%
-  summarise(
-    mean_huc = mean(mean_huc_distance, na.rm = TRUE),
-    sd = sd(mean_huc_distance, na.rm = TRUE),
-    n = n(),
-    se = sd / sqrt(n),
-    ci_lower = mean_huc - 1.96 * se,
-    ci_upper = mean_huc + 1.96 * se
-  )
-
-ggplot(summary_huc, aes(x = sponsor_type, y = mean_huc)) +
-  geom_point(size = 3) +
-  geom_errorbar(
-    aes(ymin = ci_lower, ymax = ci_upper),
-    width = 0.2
+ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance, fill = sponsor_type)) +
+  
+  # boxplot
+  geom_boxplot(
+    width = 0.4,
+    outlier.shape = NA,
+    alpha = 0.7
   ) +
+  
+  # jitter points
+  geom_jitter(
+    width = 0.15,
+    alpha = 0.5,
+    size = 1.5
+  ) +
+  
+  # mean point
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 21,          # filled circle with border
+    size = 4,            # larger
+    fill = "white",      # contrast fill
+    colour = "black",    # strong outline
+    stroke = 1.2         # thicker border
+  )  +
+  
+  # colour scheme
+  scale_fill_manual(values = c(
+    "PE" = "darkred",
+    "Government"   = "lightgreen",
+    "Nonprofit"      = "violet",
+    "Listed"         = "orange",
+    "Private"        = "cyan"
+  )) +
+  
+  # keep within valid bounds
+  coord_cartesian(ylim = c(0, 4)) +
+  
   labs(
     x = "Sponsor Type",
-    y = "Mean HUC Distance",
-    title = "Ecological Distance Between Impact and Offset Sites by Ownership Type"
+    y = "Mean Watershed (HUC) Distance Score"
   ) +
-  theme_minimal()
+  
+  theme_classic() +
+  
+  # cleaner legend handling (optional)
+  theme(
+    legend.position = "none"
+  )
