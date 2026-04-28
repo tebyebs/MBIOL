@@ -2,7 +2,7 @@
 library(dplyr)                 # Data manipulation
 library(janitor)               # Data cleaning
 library(purrr)                 # Functional programming
-library(ggplot2)   ci            # Data visualization
+library(ggplot2)               # Data visualization
 library(here)                  # File path handling
 library(tidyr) 
 library(scales)
