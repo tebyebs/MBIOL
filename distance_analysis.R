@@ -293,11 +293,27 @@ ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
   ) +
   theme_minimal()
 
-ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
-  geom_boxplot(width = 0.6) +
-  stat_summary(fun = mean, geom = "point", shape = 18, size = 3) +
-  theme_classic() +
+
+summary_huc <- bank_data %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    mean_huc = mean(mean_huc_distance, na.rm = TRUE),
+    sd = sd(mean_huc_distance, na.rm = TRUE),
+    n = n(),
+    se = sd / sqrt(n),
+    ci_lower = mean_huc - 1.96 * se,
+    ci_upper = mean_huc + 1.96 * se
+  )
+
+ggplot(summary_huc, aes(x = sponsor_type, y = mean_huc)) +
+  geom_point(size = 3) +
+  geom_errorbar(
+    aes(ymin = ci_lower, ymax = ci_upper),
+    width = 0.2
+  ) +
   labs(
     x = "Sponsor Type",
-    y = "Mean HUC Distance"
-  )
+    y = "Mean HUC Distance",
+    title = "Ecological Distance Between Impact and Offset Sites by Ownership Type"
+  ) +
+  theme_minimal()
