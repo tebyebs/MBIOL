@@ -8,13 +8,12 @@ library(tidyr)
 library(scales)
 library(networkD3)
 library(htmlwidgets)
-
+library(gt)
 
 #load in the data
 all_sponsors <- read.csv("full_sorted_data/all_sponsors.csv")
 
 ###Part 2 - Analysis over time and pending vs approved - based on gains and losses linear model
-library(gt)
 
 bank_type_table <- all_sponsors %>%
   count(bank_type, name = "Count") %>%
@@ -44,6 +43,7 @@ bank_table <- bank_type_table %>%
   )
 
 #gtsave(bank_table, "bank_type_table.docx")
+
 #filter for banks with no year established,maybe use bank status date instead
 #ALTERNATIVELY, can ignore year established and just do approved vs pending 
 
@@ -191,6 +191,84 @@ function(el) {
 p
 
 ###table of naming confusion
+cols <- c("pe_owner", "listing", "private", "govt", "nonprofit")
+
+# Function to process each column
+get_top_inconsistency <- function(df, col_name) {
+  
+  col_sym <- rlang::sym(col_name)
+  
+  # Step 1: Find most common non-yes/no entry
+  top_entry <- df %>%
+    filter(!is.na(!!col_sym)) %>%
+    filter(!tolower(!!col_sym) %in% c("yes", "no")) %>%
+    count(!!col_sym, sort = TRUE) %>%
+    slice(1) %>%
+    pull(!!col_sym)
+  
+  # Step 2: Filter rows for that entry
+  filtered <- df %>%
+    filter(!!col_sym == top_entry)
+  
+  # Step 3: Count banks
+  n_banks <- nrow(filtered)
+  
+  # Step 4: Get top 10 sponsor_name variants
+  top_names <- filtered %>%
+    count(sponsor_name, sort = TRUE) %>%
+    slice_head(n = 10) %>%
+    mutate(label = paste0(sponsor_name, " (", n, ")")) %>%
+    summarise(names = paste(label, collapse = "; ")) %>%
+    pull(names)
+  
+  # Step 5: Extract sponsor_type (most common)
+  sponsor_type <- filtered %>%
+    count(sponsor_type, sort = TRUE) %>%
+    slice(1) %>%
+    pull(sponsor_type)
+  
+  tibble(
+    sponsor_type = sponsor_type,
+    name = top_entry,
+    banks = n_banks,
+    top_10_sponsor_names = top_names
+  )
+}
+
+# Apply across all columns
+results <- map_dfr(cols, ~get_top_inconsistency(all_sponsors, .x))
+
+gt_table <- results %>%
+  rename(
+    `Sponsor Type` = sponsor_type,
+    `Entity Name` = name,
+    `Number of Banks` = banks,
+    `Top 10 Sponsor Name Variants` = top_10_sponsor_names
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Top Sponsor Naming Inconsistencies"
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = c(`Sponsor Type`, `Entity Name`, `Top 10 Sponsor Name Variants`)
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = `Number of Banks`
+  ) %>%
+  cols_width(
+    `Sponsor Type` ~ px(120),
+    `Entity Name` ~ px(200),
+    `Number of Banks` ~ px(120),
+    `Top 10 Sponsor Name Variants` ~ px(500)
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+#gtsave(gt_table, "naming_inconsistencies.docx")
 
 
 
