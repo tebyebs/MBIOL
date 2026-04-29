@@ -209,7 +209,6 @@ p2 <- p2 + theme(axis.title.y = element_blank(),
 p1 + p2 + plot_layout(widths = c(1,1))
 
 
-
 ###ANOVA TEST
 # PFO model
 pfo_model <- aov(log_avg_credit_acres ~ sponsor_type, data = functional_density_pfo)
@@ -391,3 +390,81 @@ tukey_table <- tukey_combined %>%
   )
 
 #gtsave(tukey_table, "tukey_table_journal.docx")
+
+###Violin Plot
+sponsor_cols <- c(
+  "PE" = "#8B0000",
+  "Government"     = "#90EE90",
+  "Nonprofit"      = "#800080",
+  "Listed"         = "#FFA500",
+  "Private"        = "#00FFFF"
+)
+
+plot_violin_box <- function(data, y_var, y_label) {
+  ggplot(data, aes(x = sponsor_type, y = .data[[y_var]], fill = sponsor_type)) +
+    
+    #Violin
+    geom_violin(trim = F, alpha = 0.5, colour = NA, bounds = c(0,1.5) 
+                ) +
+    
+    # Boxplot
+    geom_boxplot(
+      width = 0.4,
+      outliers = F,
+      alpha = 0.7
+    ) +
+    
+    #geom_jitter(aes(colour = sponsor_type), width = 0.15, alpha = 0.6, size = 1.5) +
+    
+    # Mean point (make visible)
+    stat_summary(
+      fun = mean,
+      geom = "point",
+      shape = 21,          # filled circle with border
+      size = 4,            # larger
+      fill = "white",      # contrast fill
+      colour = "black",    # strong outline
+      stroke = 1.2         # thicker border
+    )  +
+    
+    
+    scale_fill_manual(values = sponsor_cols) +
+    scale_colour_manual(values = c("black","black","black","black","black")) +
+    
+    labs(
+      x = "Sponsor Type",
+      y = y_label
+    ) +
+    
+    
+    theme_minimal() +
+    theme(
+      legend.position = "none",
+      
+      text = element_text(size = 16, family = "sans")
+    )
+} 
+
+pfo_credit_plot <- plot_violin_box(
+  functional_density_pfo,
+  "avg_credit_acres",
+  "Average Credit Acres"
+)
+
+pfo_log_plot <- plot_violin_box(
+  functional_density_pfo,
+  "log_avg_credit_acres",
+  "Log Average Credit Acres"
+)
+
+pem_credit_plot <- plot_violin_box(
+  functional_density_pem,
+  "avg_credit_acres",
+  "Average Credit Acres"
+)
+
+pem_log_plot <- plot_violin_box(
+  functional_density_pem,
+  "log_avg_credit_acres",
+  "Log Average Credit Acres"
+)

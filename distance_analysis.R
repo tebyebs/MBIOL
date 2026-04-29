@@ -183,27 +183,6 @@ avg_dist_by_bank <- ledger2 %>%
 
 
 
-
-
-#plot a graph
-summary_by_type <- avg_dist_by_bank %>%
-  left_join(all_sponsors, by = "bank_id") %>%
-  group_by(sponsor_type) %>%
-  summarise(
-    n = n(),
-    mean_km = mean(avg_distance_m, na.rm = TRUE) / 1000,
-    sd_km = sd(avg_distance_m, na.rm = TRUE) / 1000,
-    se_km = sd_km / sqrt(n),
-    ci_lower = mean_km - 1.96 * se_km,
-    ci_upper = mean_km + 1.96 * se_km,
-    .groups = "drop"
-  )
-
-summary_by_type <- summary_by_type %>%
-  arrange(mean_km) %>%
-  mutate(sponsor_type = factor(sponsor_type, levels = sponsor_type))
-
-
  
 
 
@@ -263,15 +242,6 @@ bank_data <- bank_data %>%
     min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE)
   )
 
-ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance)) +
-  geom_violin(trim = T, alpha = 0.6) +
-  geom_boxplot(width = 0.15, outlier.shape = NA) +
-  stat_summary(fun = mean, geom = "point", size = 2) +
-  labs(
-    x = "Sponsor Type",
-    y = "Mean HUC Distance"
-  ) +
-  theme_minimal()
 
 ###using a jitterplot since violin plot didnt really make sense here - the probability distribution extended beyond the axis limits 
 
@@ -323,5 +293,6 @@ ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance, fill = sponsor_ty
   
   # cleaner legend handling (optional)
   theme(
-    legend.position = "none"
+    legend.position = "none",
+    text = element_text(size = 16)
   )
