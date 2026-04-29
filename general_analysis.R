@@ -270,5 +270,129 @@ gt_table <- results %>%
 
 #gtsave(gt_table, "naming_inconsistencies.docx")
 
+###results table
+library(dplyr)
+library(stringr)
+library(purrr)
+library(gt)
+library(scales)
 
+cols <- c("pe_owner", "listing", "private", "govt", "nonprofit")
+
+# Total banks across entire dataset
+total_all_banks <- nrow(all_sponsors)
+
+# ---------------------------
+# Helper: clean + merge entities
+# ---------------------------
+clean_entities <- function(df, col_name) {
+  
+  col_sym <- rlang::sym(col_name)
+  
+  df %>%
+    filter(!is.na(!!col_sym)) %>%
+    filter(!tolower(!!col_sym) %in% c("yes", "no")) %>%
+    mutate(entity = !!col_sym) %>%
+    mutate(
+      entity = case_when(
+        
+        # Nonprofit merge
+        col_name == "nonprofit" &
+          str_detect(tolower(entity), "nature conservancy") ~ 
+          "The Nature Conservancy",
+        
+        # Private merge
+        col_name == "private" &
+          str_detect(tolower(entity), "naturion|water and land solutions") ~ 
+          "Naturion / Water & Land Solutions",
+        
+        TRUE ~ entity
+      )
+    )
+}
+
+# ---------------------------
+# Main function per column
+# ---------------------------
+get_top3_entities <- function(df, col_name) {
+  
+  cleaned <- clean_entities(df, col_name)
+  
+  # Total banks per sponsor_type
+  totals <- df %>%
+    count(sponsor_type, name = "total_banks")
+  
+  # Count per entity
+  counts <- cleaned %>%
+    count(entity, sponsor_type, name = "banks")
+  
+  # Aggregate AFTER merging
+  top3 <- counts %>%
+    group_by(entity) %>%
+    summarise(
+      banks = sum(banks),
+      sponsor_type = first(sponsor_type),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(banks)) %>%
+    slice_head(n = 3)
+  
+  # Add proportions
+  top3 %>%
+    left_join(totals, by = "sponsor_type") %>%
+    mutate(
+      prop_within_type = banks / total_banks,
+      prop_overall = banks / total_all_banks
+    ) %>%
+    select(sponsor_type, entity, banks, prop_within_type, prop_overall)
+}
+
+# ---------------------------
+# Apply across columns
+# ---------------------------
+results <- map_dfr(cols, ~get_top3_entities(all_sponsors, .x))
+
+# ---------------------------
+# Format table
+# ---------------------------
+gt_table <- results %>%
+  mutate(
+    prop_within_type = percent(prop_within_type, accuracy = 0.1),
+    prop_overall = percent(prop_overall, accuracy = 0.1)
+  ) %>%
+  rename(
+    `Sponsor Type` = sponsor_type,
+    `Entity Name` = entity,
+    `Number of Banks` = banks,
+    `Proportion within Sponsor Type` = prop_within_type,
+    `Proportion of All Banks` = prop_overall
+  ) %>%
+  gt() %>%
+  tab_header(
+    title = "Major Players in Mitigation Banking"
+  ) %>%
+  cols_align(
+    align = "left",
+    columns = c(`Sponsor Type`, `Entity Name`)
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c(`Number of Banks`, 
+                `Proportion within Sponsor Type`, 
+                `Proportion of All Banks`)
+  ) %>%
+  cols_width(
+    `Sponsor Type` ~ px(140),
+    `Entity Name` ~ px(300),
+    `Number of Banks` ~ px(120),
+    `Proportion within Sponsor Type` ~ px(200),
+    `Proportion of All Banks` ~ px(200)
+  ) %>%
+  tab_style(
+    style = cell_text(weight = "bold"),
+    locations = cells_column_labels(everything())
+  )
+
+gt_table
+#gtsave(gt_table, "major_players.docx")
 

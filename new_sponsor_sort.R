@@ -155,28 +155,6 @@ table(all_sponsors$sponsor_type)
 all_sponsors <- all_sponsors %>%
   mutate(sponsor_type = ifelse(sponsor_type == "single", "govt", sponsor_type))
 
-#create a table showing the differing sponsor names associated with each PE owner
-pe_summary <- pe_sponsors %>%
-  count(pe_owner, sponsor_name) %>%
-  arrange(pe_owner, desc(n)) %>%
-  group_by(pe_owner) %>%
-  summarise(
-    sponsor_names = paste0(sponsor_name, " (", n, ")", collapse = ", "),
-    .groups = "drop"
-  )
-
-pe_summary %>%
-  gt() %>%
-  # Rename columns
-  cols_label(
-    pe_owner = "Private Equity Owner",
-    sponsor_names = "Affiliated Sponsor Name Entries"
-  ) %>%
-  tab_header(
-    title = "Sponsor Names by Private Equity Owner"
-  ) #%>%
-  #gtsave("pe_summary_table.html") save if needed
-
 #CHECK FOR DUPLICATES & NA 
 sum(is.na(all_sponsors$sponsor_type))
 all_sponsors %>%
