@@ -204,16 +204,7 @@ summary_by_type <- summary_by_type %>%
   mutate(sponsor_type = factor(sponsor_type, levels = sponsor_type))
 
 
-ggplot(summary_by_type, aes(x = sponsor_type, y = mean_km)) +
-  geom_col() +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2) +
-  labs(
-    title = "Average Distance by Sponsor Type",
-    x = "Sponsor Type",
-    y = "Average Distance (km)"
-  ) +
-  theme_minimal()
-
+ 
 
 
 

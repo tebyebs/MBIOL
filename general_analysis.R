@@ -166,7 +166,7 @@ function(el) {
   var sponsorColours = {
     "PE": "#8B0000",
     "Government": "#90EE90",
-    "Nonprofit": "#800080",
+    "Nonprofit": "violet",
     "Listed": "#FFA500",
     "Private": "#00FFFF"
   };
@@ -187,4 +187,7 @@ function(el) {
 ')
 
 p
+
+
+
 

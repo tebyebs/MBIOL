@@ -5,7 +5,7 @@ library(here)
 library(patchwork)
 library(gt)
 library(broom)
-library(gt)
+
 
 
 # load in ribits ledger
