@@ -23,7 +23,7 @@ bank_type_table <- all_sponsors %>%
   arrange(desc(Count))
 
 # Create publication-ready table
-bank_type_table %>%
+bank_table <- bank_type_table %>%
   gt() %>%
   fmt_percent(
     columns = Percentage,
@@ -42,6 +42,8 @@ bank_type_table %>%
     title = "Distribution of Bank Types",
     subtitle = "Summary of categories in the RIBITS dataset"
   )
+
+#gtsave(bank_table, "bank_type_table.docx")
 #filter for banks with no year established,maybe use bank status date instead
 #ALTERNATIVELY, can ignore year established and just do approved vs pending 
 
@@ -188,6 +190,7 @@ function(el) {
 
 p
 
+###table of naming confusion
 
 
 

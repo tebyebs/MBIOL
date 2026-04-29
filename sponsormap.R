@@ -151,26 +151,30 @@ all_maps[["Private"]]$choropleth
 combined_plot <- wrap_plots(
   lapply(names(all_maps), function(type) {
     
-    all_maps[[type]]$points +
-      all_maps[[type]]$choropleth +
-      plot_layout(ncol = 2)
+    (
+      all_maps[[type]]$points +
+        all_maps[[type]]$choropleth +
+        plot_layout(ncol = 2)
+    ) +
+      plot_annotation(title = type)  # 👈 sponsor label per row
     
   }),
   ncol = 1
 ) +
-  plot_layout(guides = "collect") +   # ✅ shared legend
-  plot_annotation(tag_levels = "A") & # ✅ panel labels
+  plot_layout(guides = "collect") +
+  plot_annotation(tag_levels = "A") &
   theme(
-    legend.position = "bottom",       # cleaner for multi-panel
-    plot.tag = element_text(size = 14, face = "bold")
+    legend.position = "bottom",
+    plot.tag = element_text(size = 14, face = "bold"),
+    plot.title = element_text(size = 12, face = "bold", hjust = 0.5)
   )
 
 #ggsave(
- # filename = "sponsor_maps.tiff",
+  #filename = "sponsor_maps.tiff",
   #plot = combined_plot,
   #width = 13,
   #height = 18,
   #units = "in",
-  #dpi = 600,
-  #compression = "lzw"
+ # dpi = 600,
+#  compression = "lzw"
 #)
