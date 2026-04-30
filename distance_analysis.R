@@ -210,7 +210,11 @@ bank_data <- bank_data %>%
     ),
     mean_huc_distance = map_dbl(huc_distances, mean, na.rm = TRUE),
     max_huc_distance  = map_dbl(huc_distances, max, na.rm = TRUE),
-    min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE)
+    min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE),
+    prop_same_huc_8 = map_dbl(
+      huc_distances,
+      ~ mean(.x == 0, na.rm = TRUE)
+    )
   )
 
 
@@ -491,4 +495,254 @@ dist_log_tukey_gt <- dist_log_tukey_df %>%
 #gtsave(dist_log_anova_gt, "log_distance_anova.docx")
 #gtsave(dist_log_tukey_gt, "log_distance_tukey_with_ratios.docx")
 
+### Proportion same HUC plot + stats test
+huc_summary <- bank_data %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    mean_prop = mean(prop_same_huc, na.rm = TRUE),
+    n = n(),
+    se = sd(prop_same_huc, na.rm = TRUE) / sqrt(n),
+    ci_lower = mean_prop - 1.96 * se,
+    ci_upper = mean_prop + 1.96 * se,
+    .groups = "drop"
+  )
 
+huc_plot_data <- huc_summary %>%
+  mutate(remaining = 1 - mean_prop) %>%
+  pivot_longer(
+    cols = c(mean_prop, remaining),
+    names_to = "type",
+    values_to = "value"
+  ) %>%
+  mutate(
+    fill_group = ifelse(type == "mean_prop", sponsor_type, "remaining")
+  )
+
+huc_plot_data <- huc_plot_data %>%
+  mutate(
+    type = factor(type, levels = c("mean_prop", "remaining"))
+  )
+
+sponsor_cols <- c(
+  "PE" = "darkred",
+  "Government" = "lightgreen",
+  "Nonprofit" = "violet",
+  "Listed" = "orange",
+  "Private" = "cyan",
+  "remaining" = "white"
+)
+##NEED TO RUN BOTH GGPLOTS
+ggplot(huc_plot_data, aes(x = sponsor_type, y = value, fill = type)) +
+  
+  geom_bar(stat = "identity", width = 0.7, colour = "black") +
+  
+  geom_errorbar(
+    data = huc_summary,
+    aes(
+      x = sponsor_type,
+      ymin = ci_lower,
+      ymax = ci_upper
+    ),
+    width = 0.2,
+    colour = "black",
+    inherit.aes = FALSE
+  ) +
+  
+  scale_fill_manual(
+    values = c(
+      "mean_prop" = "grey",   # placeholder (we override below)
+      "remaining" = "white"
+    )
+  ) +
+  
+  coord_cartesian(ylim = c(0, 1)) +
+  
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+
+ggplot() +
+  
+  # White full bars (background)
+  geom_bar(
+    data = huc_summary,
+    aes(x = sponsor_type, y = 1),
+    stat = "identity",
+    width = 0.7,
+    fill = "white",
+    colour = "black"
+  ) +
+  
+  # Coloured portion (actual proportion)
+  geom_bar(
+    data = huc_summary,
+    aes(x = sponsor_type, y = mean_prop, fill = sponsor_type),
+    stat = "identity",
+    width = 0.7,
+    colour = "black"
+  ) +
+  
+  # Error bars (NOW FIXED)
+  geom_errorbar(
+    data = huc_summary,
+    aes(
+      x = sponsor_type,
+      ymin = ci_lower,
+      ymax = ci_upper
+    ),
+    width = 0.2,
+    colour = "black",
+    inherit.aes = FALSE   # ✅ THIS FIXES YOUR ERROR
+  ) +
+  
+  scale_fill_manual(values = sponsor_cols) +
+  
+  labs(
+    x = "Sponsor Type",
+    y = "Proportion of Banks in Same HUC8",
+    #title = "Localisation of Mitigation by Sponsor Type"
+  ) +
+  
+  coord_cartesian(ylim = c(0, 1)) +
+  
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none",text = element_text(size = 16))
+
+##glm attempt
+bank_data <- bank_data %>%
+  mutate(
+    n_impacts = map_int(huc_distances, ~ sum(!is.na(.x))),
+    n_same_huc = map_int(huc_distances, ~ sum(.x == 0, na.rm = TRUE))
+  )
+
+glm_quasi <- glm(
+  cbind(n_same_huc, n_impacts - n_same_huc) ~ sponsor_type,
+  family = quasibinomial,
+  data = bank_data
+)
+
+summary(glm_quasi)
+
+exp(coef(glm_quasi))
+anova(glm_quasi, test = "F")
+
+library(emmeans)
+
+emmeans(glm_quasi, pairwise ~ sponsor_type, type = "response")
+
+
+contrast_df <- as.data.frame(
+  emmeans(glm_quasi, pairwise ~ sponsor_type, type = "response")$contrasts
+)
+
+contrast_df <- contrast_df %>%
+  rename(
+    Comparison = contrast,
+    Odds_Ratio = odds.ratio,
+    SE = SE,
+    z = z.ratio,
+    p.value = p.value
+  ) %>%
+  mutate(
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+contrast_gt <- contrast_df %>%
+  gt() %>%
+  
+  fmt_number(columns = c(Odds_Ratio, SE, z), decimals = 3) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  
+  cols_merge(
+    columns = c(p.value, sig),
+    pattern = "{1} {2}"
+  ) %>%
+  
+  cols_label(
+    Comparison = "Comparison",
+    Odds_Ratio = "Odds Ratio",
+    SE = "SE",
+    z = "z",
+    p.value = "p-value"
+  ) %>%
+  
+  tab_header(
+    title = "Pairwise Comparisons of Sponsor Type",
+    subtitle = "Quasibinomial GLM (odds ratios)"
+  ) %>%
+  
+  tab_source_note(
+    source_note = md("*Note:* Odds ratios >1 indicate higher likelihood of mitigation within the same HUC for the first group in the comparison. Significance: *p* < 0.05 (*), < 0.01 (**), < 0.001 (***).")
+  ) %>%
+  
+  cols_align(align = "center", -Comparison)
+
+#gtsave(contrast_gt, "glm_pairwise_odds_ratios.docx")
+
+#anova
+anova_df <- as.data.frame(anova(glm_quasi, test = "F")) %>%
+  mutate(
+    term = rownames(.)
+  ) %>%
+  rename(
+    Df = Df,
+    Deviance = Deviance,
+    Resid_Df = `Resid. Df`,
+    Resid_Dev = `Resid. Dev`,
+    F = `F`,
+    p.value = `Pr(>F)`
+  ) %>%
+  mutate(
+    term = case_when(
+      term == "NULL" ~ "Intercept",
+      term == "sponsor_type" ~ "Sponsor Type",
+      TRUE ~ term
+    ),
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  ) %>%
+  filter(term != "Intercept")
+
+
+
+anova_gt <- anova_df %>%
+  gt() %>%
+  
+  fmt_number(columns = c(Deviance, Resid_Dev, F), decimals = 2) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  
+  cols_merge(
+    columns = c(p.value, sig),
+    pattern = "{1} {2}"
+  ) %>%
+  
+  cols_label(
+    term = "Source",
+    Df = "Df",
+    Deviance = "Deviance",
+    Resid_Df = "Residual Df",
+    Resid_Dev = "Residual Deviance",
+    F = "F",
+    p.value = "p-value"
+  ) %>%
+  
+  tab_header(
+    title = "Effect of Sponsor Type on Local Mitigation",
+    subtitle = "Analysis of Deviance (Quasibinomial GLM)"
+  ) %>%
+  
+  tab_source_note(
+    source_note = md("*Note:* Results from quasibinomial GLM with logit link. F-tests are based on analysis of deviance. Significance: *p* < 0.05 (*), < 0.01 (**), < 0.001 (***).")
+  ) %>%
+  
+  cols_align(align = "center", -term)
+
+#gtsave(anova_gt, "glm_anova_table.docx")
