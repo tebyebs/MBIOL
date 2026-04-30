@@ -404,7 +404,7 @@ plot_violin_box <- function(data, y_var, y_label) {
   ggplot(data, aes(x = sponsor_type, y = .data[[y_var]], fill = sponsor_type)) +
     
     #Violin
-    geom_violin(trim = F, alpha = 0.5, colour = NA, bounds = c(0,1.5) 
+    geom_violin(trim = F, alpha = 0.5, colour = NA, #bounds = c(0,1.5) 
                 ) +
     
     # Boxplot
@@ -448,23 +448,40 @@ plot_violin_box <- function(data, y_var, y_label) {
 pfo_credit_plot <- plot_violin_box(
   functional_density_pfo,
   "avg_credit_acres",
-  "Average Credit Acres"
+  "Credit Acres"
 )
 
 pfo_log_plot <- plot_violin_box(
   functional_density_pfo,
   "log_avg_credit_acres",
-  "Log Average Credit Acres"
+  "Log Credit Acres"
 )
 
 pem_credit_plot <- plot_violin_box(
   functional_density_pem,
   "avg_credit_acres",
-  "Average Credit Acres"
+  "Credit Acres"
 )
 
 pem_log_plot <- plot_violin_box(
   functional_density_pem,
   "log_avg_credit_acres",
-  "Log Average Credit Acres"
+  "Log Credit Acres"
 )
+
+pfo_credit_plot <- pfo_credit_plot + ggtitle("PFO (Raw)")
+pfo_log_plot    <- pfo_log_plot + ggtitle("PFO (Log)")
+pem_credit_plot <- pem_credit_plot + ggtitle("PEM (Raw)")
+pem_log_plot    <- pem_log_plot + ggtitle("PEM (Log)")
+
+(pfo_credit_plot | pem_credit_plot ) +
+
+  plot_annotation(
+    tag_levels = "A"
+  )
+
+(pfo_log_plot | pem_log_plot ) +
+  
+  plot_annotation(
+    tag_levels = "A "
+  )

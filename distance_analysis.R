@@ -159,35 +159,6 @@ ledger2$within_us <- ledger_sf$within_us
 ledger2 <- ledger2 %>%
   filter(within_us)
 
-#compute again
-avg_dist_by_bank <- ledger2 %>%
-  left_join(
-    sponsors2 %>% select(bank_id, sponsor_lat = latitude, sponsor_lon = longitude),
-    by = "bank_id"
-  ) %>%
-  filter(
-    !is.na(sponsor_lon), !is.na(sponsor_lat),
-    !is.na(impact_location_longitude), !is.na(impact_location_latitude)
-  ) %>%
-  mutate(
-    distance_m = distHaversine(
-      cbind(sponsor_lon, sponsor_lat),
-      cbind(impact_location_longitude, impact_location_latitude)
-    )
-  ) %>%
-  group_by(bank_id) %>%
-  summarise(
-    avg_distance_m = mean(distance_m, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-
-
- 
-
-
-
-
 ### STAGE 3 HUC ECOLOGICAL ANALYSIS
 ledger2_clean <- ledger2 %>%
   mutate(
@@ -296,3 +267,228 @@ ggplot(bank_data, aes(x = sponsor_type, y = mean_huc_distance, fill = sponsor_ty
     legend.position = "none",
     text = element_text(size = 16)
   )
+
+
+#plotting distance by bank, based on the cleaned dataset
+avg_dist_by_bank <- ledger2_clean %>%
+  left_join(
+    sponsors2 %>% select(bank_id, sponsor_lat = latitude, sponsor_lon = longitude),
+    by = "bank_id"
+  ) %>%
+  filter(
+    !is.na(sponsor_lon), !is.na(sponsor_lat),
+    !is.na(impact_location_longitude), !is.na(impact_location_latitude)
+  ) %>%
+  mutate(
+    distance_m = distHaversine(
+      cbind(sponsor_lon, sponsor_lat),
+      cbind(impact_location_longitude, impact_location_latitude)
+    )
+  ) %>%
+  group_by(bank_id) %>%
+  summarise(
+    avg_distance_m = mean(distance_m, na.rm = TRUE),
+    .groups = "drop" 
+  ) %>%
+  inner_join(all_sponsors, by = "bank_id")
+
+avg_dist_by_bank <- avg_dist_by_bank %>%
+  mutate(
+    avg_distance_km = avg_distance_m / 1000
+  )
+
+#plot jitter of distances
+# Define colour scheme (from your spec)
+sponsor_cols <- c(
+  "PE" = "darkred",
+  "Government" = "lightgreen",
+  "Nonprofit" = "violet",
+  "Listed" = "orange",
+  "Private" = "cyan"
+)
+
+dist <- ggplot(avg_dist_by_bank, aes(x = sponsor_type, y = avg_distance_km, fill = sponsor_type)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(aes(color = sponsor_type), width = 0.2, size = 2, alpha = 0.4) +
+  #geom_violin(trim = T, alpha = 0.5, colour = NA, #bounds = c(0,200)
+  #            ) + 
+  scale_fill_manual(values = sponsor_cols) +
+  scale_color_manual(values = c("grey20","grey20","grey20","grey20","grey20")) +
+  labs(
+    x = "Sponsor Type",
+    y = "Average Distance (km)",
+   # title = "Distance Between Impact and Mitigation Bank by Sponsor Type"
+  ) +
+  # mean point
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 21,          # filled circle with border
+    size = 4,            # larger
+    fill = "white",      # contrast fill
+    colour = "black",    # strong outline
+    stroke = 1.2         # thicker border
+  )  +
+  #coord_cartesian(ylim = c(0, 200)) +
+  theme_classic() +
+  
+  # cleaner legend handling (optional)
+  theme(
+    legend.position = "none",
+    text = element_text(size = 16)
+  )
+
+
+avg_dist_by_bank <- avg_dist_by_bank %>%
+  mutate(
+    log_distance_km = log(avg_distance_km)
+  )
+
+logdist <- ggplot(avg_dist_by_bank, aes(x = sponsor_type, y = log_distance_km, fill = sponsor_type)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(aes(color = sponsor_type), width = 0.2, size = 2, alpha = 0.4) +
+  #geom_violin(trim = T, alpha = 0.5, colour = NA, #bounds = c(0,200)
+  #            ) + 
+  scale_fill_manual(values = sponsor_cols) +
+  scale_color_manual(values = c("grey20","grey20","grey20","grey20","grey20")) +
+  labs(
+    x = "Sponsor Type",
+    y = "Log Average Distance",
+    # title = "Distance Between Impact and Mitigation Bank by Sponsor Type"
+  ) +
+  # mean point
+  stat_summary(
+    fun = mean,
+    geom = "point",
+    shape = 21,          # filled circle with border
+    size = 4,            # larger
+    fill = "white",      # contrast fill
+    colour = "black",    # strong outline
+    stroke = 1.2         # thicker border
+  )  +
+  #coord_cartesian(ylim = c(0, 200)) +
+  theme_classic() +
+  
+  # cleaner legend handling (optional)
+  theme(
+    legend.position = "none",
+    text = element_text(size = 16)
+  )
+library(patchwork)
+dist <- dist + ggtitle("Raw Distance")
+logdist <- logdist + ggtitle(("Log Distance"))
+
+dist + logdist +
+  plot_annotation(
+    tag_levels = "A")
+
+dist_model_log <- aov(log_distance_km ~ sponsor_type, data = avg_dist_by_bank)
+
+library(broom)
+library(dplyr)
+library(gt)
+
+dist_log_anova <- tidy(dist_model_log) %>%
+  mutate(
+    term = case_when(
+      term == "sponsor_type" ~ "Sponsor Type",
+      term == "Residuals" ~ "Residuals"
+    ),
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+dist_log_anova_gt <- dist_log_anova %>%
+  gt() %>%
+  fmt_number(columns = c(sumsq, meansq, statistic), decimals = 3) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  cols_merge(columns = c(p.value, sig), pattern = "{1} {2}") %>%
+  cols_label(
+    term = "Source",
+    df = "Df",
+    sumsq = "Sum Sq",
+    meansq = "Mean Sq",
+    statistic = "F",
+    p.value = "p-value"
+  ) %>%
+  tab_header(
+    title = "Effect of Sponsor Type on Log Distance",
+    subtitle = "One-way ANOVA (log-transformed distance in km)"
+  ) %>%
+  tab_source_note(
+    source_note = md("*Note:* Values are based on log-transformed distance (km). Significance: *p* < 0.05 (*), < 0.01 (**), < 0.001 (***).")
+  ) %>%
+  cols_align(align = "center", -term)
+
+dist_log_tukey <- TukeyHSD(dist_model_log)
+
+dist_log_tukey_df <- as.data.frame(dist_log_tukey$sponsor_type) %>%
+  mutate(comparison = rownames(.)) %>%
+  rename(
+    Difference = diff,
+    Lower_CI = lwr,
+    Upper_CI = upr,
+    p.value = `p adj`
+  ) %>%
+  mutate(
+    distance_ratio = exp(Difference),
+    ratio_lower = exp(Lower_CI),
+    ratio_upper = exp(Upper_CI),
+    sig = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+dist_log_tukey_gt <- dist_log_tukey_df %>%
+  gt() %>%
+  
+  # Format numeric columns
+  fmt_number(columns = c(Difference, Lower_CI, Upper_CI), decimals = 3) %>%
+  fmt_number(columns = c(distance_ratio, ratio_lower, ratio_upper), decimals = 2) %>%
+  fmt_scientific(columns = p.value, decimals = 2) %>%
+  
+  # Merge p-value + stars
+  cols_merge(
+    columns = c(p.value, sig),
+    pattern = "{1} {2}"
+  ) %>%
+  
+  # Labels
+  cols_label(
+    comparison = "Comparison",
+    Difference = "Mean Diff (log km)",
+    Lower_CI = "Lower CI",
+    Upper_CI = "Upper CI",
+    distance_ratio = "Distance Ratio",
+    ratio_lower = "Ratio CI (Lower)",
+    ratio_upper = "Ratio CI (Upper)",
+    p.value = "p-value"
+  ) %>%
+  
+  # Title
+  tab_header(
+    title = "Pairwise Comparisons of Sponsor Type",
+    subtitle = "Tukey HSD with Back-Transformed Distance Ratios"
+  ) %>%
+  
+  # Footnote
+  tab_source_note(
+    source_note = md("*Note:* Distance ratios represent multiplicative differences between groups (e.g., 2 = twice as far, 0.5 = half as far). Confidence intervals shown for both log-scale and ratio-scale estimates.")
+  ) %>%
+  
+  cols_align(
+    align = "center",
+    -comparison
+  )
+
+#gtsave(dist_log_anova_gt, "log_distance_anova.docx")
+#gtsave(dist_log_tukey_gt, "log_distance_tukey_with_ratios.docx")
+
+
