@@ -211,7 +211,7 @@ bank_data <- bank_data %>%
     mean_huc_distance = map_dbl(huc_distances, mean, na.rm = TRUE),
     max_huc_distance  = map_dbl(huc_distances, max, na.rm = TRUE),
     min_huc_distance  = map_dbl(huc_distances, min, na.rm = TRUE),
-    prop_same_huc_8 = map_dbl(
+    prop_same_huc = map_dbl(
       huc_distances,
       ~ mean(.x == 0, na.rm = TRUE)
     )
@@ -346,6 +346,19 @@ dist <- ggplot(avg_dist_by_bank, aes(x = sponsor_type, y = avg_distance_km, fill
 avg_dist_by_bank <- avg_dist_by_bank %>%
   mutate(
     log_distance_km = log(avg_distance_km)
+  )
+
+##summary:
+distsum <- bank_data %>%
+  group_by(sponsor_type) %>%
+  summarise(
+    mean = mean(mean_huc_distance, na.rm = TRUE),
+    sd = sd(mean_huc_distance, na.rm = TRUE),
+    n = n(),
+    se = sd / sqrt(n),
+    lower = mean - 1.96 * se,
+    upper = mean + 1.96 * se,
+    .groups = "drop"
   )
 
 logdist <- ggplot(avg_dist_by_bank, aes(x = sponsor_type, y = log_distance_km, fill = sponsor_type)) +
