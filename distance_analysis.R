@@ -759,3 +759,31 @@ anova_gt <- anova_df %>%
   cols_align(align = "center", -term)
 
 #gtsave(anova_gt, "glm_anova_table.docx")
+
+
+#histogram
+ggplot(bank_data, aes(x = mean_huc_distance, fill = sponsor_type)) +
+  geom_histogram(
+    binwidth = 0.2,
+    boundary = 0,
+    color = "black"
+  ) +
+  facet_wrap(~ sponsor_type, ncol = 1, scales = "free_y") +
+  scale_x_continuous(limits = c(0, 4), breaks = seq(0, 4, by = 0.5)) +
+  scale_fill_manual(values = c(
+    "PE" = "darkred",
+    "Government" = "lightgreen",
+    "Nonprofit" = "violet",
+    "Listed" = "orange",
+    "Private" = "cyan"
+  )) +
+  labs(
+    title = "Distribution of Mean HUC Score by Sponsor Type",
+    x = "Mean HUC Score",
+    y = "Frequency"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  )
